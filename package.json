@@ -1,0 +1,57 @@
+{
+  "name": "@evantahler/icloud-backup",
+  "version": "0.1.0",
+  "description": "Append-only backup of iCloud Photos, Drive, Notes, and Contacts to any local directory.",
+  "type": "module",
+  "bin": {
+    "icloud-backup": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test",
+    "lint": "tsc --noEmit && biome check .",
+    "format": "biome check --write .",
+    "build": "bun build --compile --minify --sourcemap ./src/index.ts --outfile dist/icloud-backup"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evantahler/icloud-backup.git"
+  },
+  "keywords": [
+    "icloud",
+    "backup",
+    "photos",
+    "notes",
+    "contacts",
+    "drive",
+    "macos",
+    "bun"
+  ],
+  "author": "Evan Tahler",
+  "license": "MIT",
+  "dependencies": {
+    "macos-ts": "^0.9.3",
+    "cli-progress": "^3.12.0",
+    "commander": "^14.0.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/bun": "latest",
+    "@types/cli-progress": "^3.11.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.1"
+  }
+}

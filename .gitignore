@@ -1,0 +1,31 @@
+# dependencies
+node_modules
+
+# output
+dist
+*.tgz
+
+# logs
+*.log
+
+# coverage
+coverage
+*.lcov
+
+# caches
+.cache
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store

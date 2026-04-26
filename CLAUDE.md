@@ -16,7 +16,7 @@ Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed three 
 
 ## Key external dependencies
 
-- **`macos-ts`** lives at `~/workspace/macos-ts/` and is consumed via `file:../macos-ts` during development. It owns all the macOS SQLite reads (Photos, Notes, Contacts). Before publishing to npm, this must be switched to a published version or git URL — npm rejects `file:` deps.
+- **`macos-ts`** is consumed from npm (`^0.9.2`). It owns all the macOS SQLite reads (Photos, Notes, Contacts). Source also lives at `~/workspace/macos-ts/` if you need to fix something upstream — see "Fixing dependencies upstream" below.
 - **`bun:sqlite`** for per-lane manifests at `~/.icloud-backup/manifests/<lane>.sqlite`. Manifests track what's been copied so re-runs are incremental and crash-safe.
 - **`brctl`** (built into macOS) for materializing iCloud Drive files before copying.
 - **No rsync.** All file I/O goes through `Bun.file` / `Bun.write` with atomic write-to-tmp + rename.
@@ -50,6 +50,12 @@ The plan specifies these `package.json` scripts; when they exist, prefer them ov
 - `bun build --compile --minify --sourcemap ./src/index.ts --outfile dist/icloud-backup` — build a binary
 
 For local development the plan calls for `bun link` from this directory so `icloud-backup` resolves globally.
+
+## Fixing dependencies upstream
+
+When a bug or limitation is in a package the user owns (e.g. `macos-ts` at `~/workspace/macos-ts/`), **fix it in that package** rather than working around it here. File a GitHub issue, push a PR upstream, then bump the version range. Local workarounds like `tsconfig.json` `paths` mappings, patch-package, or shim modules are a smell and should be avoided unless the upstream fix is infeasible.
+
+Example: macos-ts 0.9.2 was missing `exports`/`main`/`types` in its `package.json`, causing TS bundler resolution to fail. The right fix was [evantahler/macos-ts#29](https://github.com/evantahler/macos-ts/issues/29) — not a `paths` workaround here.
 
 ## Out of scope
 
