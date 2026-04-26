@@ -8,9 +8,13 @@ import type { ProgressEvent } from "../tui.ts";
 
 export interface PhotosCfg {
   dest: string;
+  snapshot?: boolean;
 }
 
-export async function* runPhotos({ dest }: PhotosCfg): AsyncIterable<ProgressEvent> {
+export async function* runPhotos({
+  dest,
+  snapshot = true,
+}: PhotosCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/photos`;
   const mf = await Manifest.open("photos");
   const db = new Photos();
@@ -122,6 +126,7 @@ export async function* runPhotos({ dest }: PhotosCfg): AsyncIterable<ProgressEve
       };
     }
 
+    if (snapshot) await mf.snapshot("photos", dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

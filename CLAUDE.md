@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-This repo is **pre-implementation**. The only file under version control is `docs/plans/plan.md`, which is the authoritative design spec for the project. Read it before doing any work — it covers the CLI surface, architecture, manifest schema, release pipeline, and per-lane logic in detail.
-
-The actual `package.json`, `tsconfig.json`, `src/`, and `.github/workflows/` files described in the plan **do not exist yet**. When implementing, follow the layout and module sketches in `docs/plans/plan.md` rather than inventing a new structure.
+This repo is **implemented and shipping**. `docs/plans/plan.md` is the authoritative design spec — read it before making non-trivial changes; the actual code under `src/` follows its layout. When the plan and the code drift, decide which one is right and fix the other in the same change.
 
 ## What this is
 
@@ -28,6 +26,7 @@ Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed three 
 - **Append-only, never overwrite in place.** When a source changes, archive the existing destination file under `<dest>/_overwritten/<date>/v<n>/` *before* writing the new version. Manifest upsert is the *last* step per file so a crash mid-copy is idempotent on retry.
 - **Per-service flags override `--all`.** At least one service flag (or `--doctor` / `--rebuild` / `--upgrade` / `--check-update`) is required.
 - **Auto-release pipeline mirrors `~/workspace/mcpx`.** Version bump in `package.json` → push to `main` → workflow creates GH release, publishes to npm with `--provenance`, builds `darwin-arm64` and `darwin-x64` binaries. Reference mcpx for workflow YAML structure when implementing `.github/workflows/auto-release.yml`.
+- **Always bump `package.json` `version` when shipping code changes.** Any commit that modifies behavior (new feature, bug fix, breaking change) bumps the version in the *same* commit. The auto-release workflow keys off the `version` field, so an un-bumped change is invisible to npm/binary consumers. Use semver: patch for fixes, minor for features, major for breaking. Doc-only / test-only / formatting-only commits do not need a bump — anything that ships in `src/` does.
 
 ## Diff rules per lane (don't change without good reason)
 
@@ -40,16 +39,17 @@ Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed three 
 
 Contacts uses sha256 because Apple's `modifiedAt` on contacts isn't reliable. Photos/Drive intentionally avoid hashing for performance.
 
-## Commands (once implemented per plan)
+## Commands
 
-The plan specifies these `package.json` scripts; when they exist, prefer them over inventing new ones:
+Use the `package.json` scripts; don't invent new ones:
 
-- `bun src/index.ts` — run from source
+- `bun run dev` — run from source (`bun run src/index.ts`)
 - `bun test` — run tests
-- `prettier --check .` — lint
-- `bun build --compile --minify --sourcemap ./src/index.ts --outfile dist/icloud-backup` — build a binary
+- `bun run lint` — typecheck + biome check (`tsc --noEmit && biome check .`)
+- `bun run format` — biome auto-fix (`biome check --write .`)
+- `bun run build` — compile a standalone binary
 
-For local development the plan calls for `bun link` from this directory so `icloud-backup` resolves globally.
+For local development: `bun link` from this directory so `icloud-backup` resolves globally.
 
 ## Fixing dependencies upstream
 

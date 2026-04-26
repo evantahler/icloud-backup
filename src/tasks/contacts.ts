@@ -7,9 +7,13 @@ import type { ProgressEvent } from "../tui.ts";
 
 export interface ContactsCfg {
   dest: string;
+  snapshot?: boolean;
 }
 
-export async function* runContacts({ dest }: ContactsCfg): AsyncIterable<ProgressEvent> {
+export async function* runContacts({
+  dest,
+  snapshot = true,
+}: ContactsCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/contacts`;
   const mf = await Manifest.open("contacts");
   const db = new Contacts();
@@ -70,6 +74,7 @@ export async function* runContacts({ dest }: ContactsCfg): AsyncIterable<Progres
       yield { type: "file", name: display, bytesDelta: bytes, index: i + 1 };
     }
 
+    if (snapshot) await mf.snapshot("contacts", dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

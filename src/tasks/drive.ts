@@ -7,11 +7,12 @@ import { type WalkedFile, walk } from "../walker.ts";
 
 export interface DriveCfg {
   dest: string;
+  snapshot?: boolean;
 }
 
 const DRIVE_ROOTS = ["Desktop", "Documents"] as const;
 
-export async function* runDrive({ dest }: DriveCfg): AsyncIterable<ProgressEvent> {
+export async function* runDrive({ dest, snapshot = true }: DriveCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/drive`;
   const mf = await Manifest.open("drive");
 
@@ -89,6 +90,7 @@ export async function* runDrive({ dest }: DriveCfg): AsyncIterable<ProgressEvent
       yield { type: "file", name: f.rel, bytesDelta: bytes, index: i + 1 };
     }
 
+    if (snapshot) await mf.snapshot("drive", dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

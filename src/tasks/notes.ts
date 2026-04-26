@@ -8,9 +8,10 @@ import type { ProgressEvent } from "../tui.ts";
 
 export interface NotesCfg {
   dest: string;
+  snapshot?: boolean;
 }
 
-export async function* runNotes({ dest }: NotesCfg): AsyncIterable<ProgressEvent> {
+export async function* runNotes({ dest, snapshot = true }: NotesCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/notes`;
   const mf = await Manifest.open("notes");
   const db = new Notes();
@@ -119,6 +120,7 @@ export async function* runNotes({ dest }: NotesCfg): AsyncIterable<ProgressEvent
       yield { type: "file", name: display, bytesDelta: total, index: i + 1 };
     }
 
+    if (snapshot) await mf.snapshot("notes", dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();
