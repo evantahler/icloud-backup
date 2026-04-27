@@ -142,10 +142,13 @@ export async function* walkServiceDest(
           const modifiedAt = byId.get(id);
           if (modifiedAt === undefined) continue;
           const st = await stat(abs);
+          // Mirror the lane's source_key format so a post-rebuild run dedups
+          // correctly. See src/tasks/notes.ts where sourceKey is built.
+          const attachmentCount = db.listAttachments(id).length;
           yield {
             source_id: `${id}`,
             dest_path: abs,
-            source_key: `${modifiedAt}`,
+            source_key: `${modifiedAt}|${attachmentCount}`,
             size_bytes: st.size,
             backed_up_at: modifiedAt,
             version: 1,
