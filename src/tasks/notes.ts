@@ -13,6 +13,32 @@ export interface NotesCfg {
   snapshot?: boolean;
 }
 
+// Apple Notes auto-names attachments after the note title, so duplicates
+// within a single note are common. Without disambiguation, atomicCopy would
+// silently rename-clobber earlier files at the same path.
+export function chooseAttachmentName(
+  rawName: string | null | undefined,
+  id: number,
+  seen: Set<string>,
+): string {
+  const base = sanitizeFilename(rawName || `attachment-${id}`);
+  if (!seen.has(base)) {
+    seen.add(base);
+    return base;
+  }
+  const dotIdx = base.lastIndexOf(".");
+  const stem = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+  const ext = dotIdx > 0 ? base.slice(dotIdx) : "";
+  let candidate = `${stem}-${id}${ext}`;
+  let n = 2;
+  while (seen.has(candidate)) {
+    candidate = `${stem}-${id}-${n}${ext}`;
+    n++;
+  }
+  seen.add(candidate);
+  return candidate;
+}
+
 export async function* runNotes({
   dest,
   concurrency,
@@ -86,6 +112,7 @@ export async function* runNotes({
         // Populated as we copy; consumed by attachmentLinkBuilder when rendering.
         const linkMap = new Map<string, string>();
         const attachmentsDirName = basename(attachmentsDir);
+        const seenAttachmentNames = new Set<string>();
 
         for (const a of attachments) {
           if (!a.url) {
@@ -108,7 +135,7 @@ export async function* runNotes({
             });
             continue;
           }
-          const safeName = sanitizeFilename(a.name || `attachment-${a.id}`);
+          const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames);
           const aOut = join(attachmentsDir, safeName);
           try {
             attachmentBytes += await atomicCopy(src, aOut);
