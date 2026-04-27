@@ -13,6 +13,22 @@ export interface NotesCfg {
   snapshot?: boolean;
 }
 
+// Attachment rows whose ZTYPEUTI matches one of these never have a file on
+// disk — content lives in the note body or in ZMERGEABLEDATA1 — so resolving
+// them as files always returns "not-found" and floods the log with noise.
+const NON_FILE_ATTACHMENT_TYPES = new Set([
+  "com.apple.notes.table",
+  "com.apple.notes.gallery",
+  "com.apple.notes.inlinetextattachment.hashtag",
+  "com.apple.notes.inlinetextattachment.mention",
+  "com.apple.notes.inlinetextattachment.link",
+]);
+
+function errReason(err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  return e?.code ? `${e.code}: ${e.message}` : ((e?.message as string) ?? String(err));
+}
+
 // Apple Notes auto-names attachments after the note title, so duplicates
 // within a single note are common. Without disambiguation, atomicCopy would
 // silently rename-clobber earlier files at the same path.
@@ -116,12 +132,16 @@ export async function* runNotes({
 
         for (const a of attachments) {
           if (!a.url) {
+            // Skip rows that are never file-backed by design — warning on them
+            // would just produce noise on every run.
+            if (NON_FILE_ATTACHMENT_TYPES.has(a.contentType)) continue;
             const detail = db.resolveAttachment(a.identifier || a.name);
             const reason = "error" in detail ? detail.error : "unknown";
+            const nameOrId = a.name || `(no name, id=${a.id})`;
             queue.push({
               type: "log",
               level: "warn",
-              message: `attachment unresolved (${reason}): ${display}/${a.name || `(no name, id=${a.id})`} (identifier=${a.identifier || "(empty)"}, type=${a.contentType})`,
+              message: `[unresolved/${reason}] type=${a.contentType} identifier=${a.identifier || "(empty)"} :: ${display} :: ${nameOrId}`,
             });
             continue;
           }
@@ -131,7 +151,7 @@ export async function* runNotes({
             queue.push({
               type: "log",
               level: "warn",
-              message: `attachment source missing: ${display}/${a.name}: ${src}`,
+              message: `[source-missing] ${display} :: ${a.name} :: ${src}`,
             });
             continue;
           }
@@ -145,7 +165,7 @@ export async function* runNotes({
             queue.push({
               type: "log",
               level: "warn",
-              message: `attachment copy failed: ${display}/${a.name}: ${(err as Error).message}`,
+              message: `[copy-failed/${errReason(err)}] ${display} :: ${a.name}`,
             });
           }
         }
@@ -164,7 +184,7 @@ export async function* runNotes({
           queue.push({
             type: "log",
             level: "warn",
-            message: `read failed: ${display} (${(err as Error).message})`,
+            message: `[read-failed/${errReason(err)}] ${display}`,
           });
           return;
         }
@@ -187,7 +207,7 @@ export async function* runNotes({
         queue.push({
           type: "log",
           level: "warn",
-          message: `${display}: ${(err as Error).message}`,
+          message: `[${errReason(err)}] ${display}`,
         });
       } finally {
         completed++;
