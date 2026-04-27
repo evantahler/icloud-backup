@@ -121,4 +121,114 @@ describe("Manifest", () => {
     expect(mf.all()).toEqual([]);
     mf.close();
   });
+
+  test("snapshot writes .manifest.sqlite and .manifest.json with matching entries", async () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "abc",
+      dest_path: "/x/a.heic",
+      source_key: "k1",
+      size_bytes: 10,
+      backed_up_at: 100,
+      version: 1,
+    });
+    mf.upsert({
+      source_id: "def",
+      dest_path: "/x/b.heic",
+      source_key: "k2",
+      size_bytes: 20,
+      backed_up_at: 200,
+      version: 1,
+    });
+
+    await mf.snapshot("photos", tmp);
+
+    const sqliteSnap = `${tmp}/photos/.manifest.sqlite`;
+    const jsonSnap = `${tmp}/photos/.manifest.json`;
+    expect(await Bun.file(sqliteSnap).exists()).toBe(true);
+    expect(await Bun.file(jsonSnap).exists()).toBe(true);
+
+    const json = (await Bun.file(jsonSnap).json()) as {
+      lane: string;
+      generatedAt: string;
+      count: number;
+      entries: Array<{ source_id: string }>;
+    };
+    expect(json.lane).toBe("photos");
+    expect(json.count).toBe(2);
+    expect(new Set(json.entries.map((e) => e.source_id))).toEqual(new Set(["abc", "def"]));
+    expect(typeof json.generatedAt).toBe("string");
+
+    // Open the snapshot DB directly — it should be a valid manifest with same rows.
+    const restored = new Manifest(sqliteSnap);
+    expect(restored.get("abc")?.size_bytes).toBe(10);
+    expect(restored.get("def")?.size_bytes).toBe(20);
+    expect(restored.all().length).toBe(2);
+    restored.close();
+
+    mf.close();
+  });
+
+  test("snapshot is overwritable (re-running replaces the prior snapshot)", async () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "abc",
+      dest_path: "/x/a",
+      source_key: "v1",
+      size_bytes: 10,
+      backed_up_at: 1,
+      version: 1,
+    });
+    await mf.snapshot("notes", tmp);
+
+    mf.upsert({
+      source_id: "abc",
+      dest_path: "/x/a",
+      source_key: "v2",
+      size_bytes: 20,
+      backed_up_at: 2,
+      version: 2,
+    });
+    mf.upsert({
+      source_id: "ghi",
+      dest_path: "/x/c",
+      source_key: "v1",
+      size_bytes: 30,
+      backed_up_at: 3,
+      version: 1,
+    });
+    await mf.snapshot("notes", tmp);
+
+    const json = (await Bun.file(`${tmp}/notes/.manifest.json`).json()) as {
+      count: number;
+      entries: Array<{ source_id: string; size_bytes: number; version: number }>;
+    };
+    expect(json.count).toBe(2);
+    const abc = json.entries.find((e) => e.source_id === "abc");
+    expect(abc?.size_bytes).toBe(20);
+    expect(abc?.version).toBe(2);
+
+    mf.close();
+  });
+
+  test("snapshot leaves no .tmp files behind on success", async () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "abc",
+      dest_path: "/x/a",
+      source_key: "k",
+      size_bytes: 10,
+      backed_up_at: 1,
+      version: 1,
+    });
+    await mf.snapshot("drive", tmp);
+
+    const { readdirSync } = await import("node:fs");
+    const files = readdirSync(`${tmp}/drive`);
+    expect(files.some((f) => f.includes(".tmp."))).toBe(false);
+    expect(files).toContain(".manifest.sqlite");
+    expect(files).toContain(".manifest.json");
+
+    mf.close();
+  });
 });

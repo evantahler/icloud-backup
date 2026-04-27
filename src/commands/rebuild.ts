@@ -32,6 +32,11 @@ async function rebuildLane(service: Service, dest: string): Promise<number> {
   }
 }
 
+function isManifestSnapshot(rel: string): boolean {
+  const base = rel.split("/").pop();
+  return base === ".manifest.sqlite" || base === ".manifest.json";
+}
+
 async function* walkServiceDest(
   service: Service,
   root: string,
@@ -48,6 +53,7 @@ async function* walkServiceDest(
       const glob = new Glob("**/*");
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
         if (rel.startsWith("_overwritten/")) continue;
+        if (isManifestSnapshot(rel)) continue;
         const abs = `${root}/${rel}`;
         const st = await stat(abs);
         const mtimeMs = Math.floor(st.mtimeMs);
@@ -66,6 +72,7 @@ async function* walkServiceDest(
       const glob = new Glob("**/*.json");
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
         if (rel.startsWith("_overwritten/")) continue;
+        if (isManifestSnapshot(rel)) continue;
         const sidecar = `${root}/${rel}`;
         const original = sidecar.slice(0, -".json".length);
         let st: Awaited<ReturnType<typeof stat>>;
@@ -102,6 +109,7 @@ async function* walkServiceDest(
         const glob = new Glob("**/*.md");
         for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
           if (rel.startsWith("_overwritten/")) continue;
+          if (isManifestSnapshot(rel)) continue;
           const abs = `${root}/${rel}`;
           const id = parseTrailingId(rel.replace(/\.md$/, ""));
           if (id === null) continue;
@@ -128,6 +136,7 @@ async function* walkServiceDest(
         const glob = new Glob("*.json");
         for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
           if (rel.startsWith("_overwritten/")) continue;
+          if (isManifestSnapshot(rel)) continue;
           const abs = `${root}/${rel}`;
           const id = parseTrailingId(rel.replace(/\.json$/, ""));
           if (id === null) continue;

@@ -10,6 +10,8 @@ export interface ParsedFlags {
   checkUpdate: boolean;
   upgrade: boolean;
   concurrency: number;
+  /** Whether to write `<dest>/<lane>/.manifest.{sqlite,json}` snapshots at end of each successful lane. */
+  snapshot: boolean;
 }
 
 export const DEFAULT_CONCURRENCY = 5;
@@ -28,6 +30,12 @@ export function buildProgram(): Command {
     .addOption(new Option("--all <path>", "shorthand for all four services"))
     .addOption(new Option("--doctor", "run preflight checks and exit"))
     .addOption(new Option("--rebuild", "walk destinations and rebuild manifests"))
+    .addOption(
+      new Option(
+        "--no-manifest-snapshot",
+        "skip writing .manifest.sqlite/.json next to backed-up data",
+      ),
+    )
     .addOption(new Option("--check-update", "force a fresh npm-registry check"))
     .addOption(new Option("--upgrade", "upgrade to the latest published version"))
     .addOption(
@@ -74,6 +82,9 @@ export function flagsFromOpts(opts: Record<string, unknown>): ParsedFlags {
     const dest = typeof flagDest === "string" ? flagDest : all;
     if (dest) lanes.push({ service, dest });
   }
+  // commander maps `--no-manifest-snapshot` → opts.manifestSnapshot === false.
+  // Default (flag absent) is true.
+  const snapshot = opts.manifestSnapshot !== false;
   return {
     lanes,
     doctor: !!opts.doctor,
@@ -81,6 +92,7 @@ export function flagsFromOpts(opts: Record<string, unknown>): ParsedFlags {
     checkUpdate: !!opts.checkUpdate,
     upgrade: !!opts.upgrade,
     concurrency: typeof opts.concurrency === "number" ? opts.concurrency : DEFAULT_CONCURRENCY,
+    snapshot,
   };
 }
 

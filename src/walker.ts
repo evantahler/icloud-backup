@@ -1,7 +1,14 @@
 import { lstat } from "node:fs/promises";
 import { Glob } from "bun";
 
-const EXCLUDE_NAMES = new Set([".DS_Store", ".localized"]);
+const EXCLUDE_NAMES = new Set([
+  ".DS_Store",
+  ".localized",
+  // Our own manifest snapshots — never back them up even if a user nests a destination
+  // under a watched source root.
+  ".manifest.sqlite",
+  ".manifest.json",
+]);
 const EXCLUDE_PATH_FRAGMENTS = ["/.Trash/", "/.git/", "/node_modules/"];
 
 export interface WalkedFile {

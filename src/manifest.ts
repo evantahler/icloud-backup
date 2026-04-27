@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
+import { copyFile, rename, unlink } from "node:fs/promises";
 import type { Service } from "./config.ts";
-import { ensureStateDirs, MANIFEST_DIR } from "./fsutil.ts";
+import { ensureStateDirs, MANIFEST_DIR, mkdirp } from "./fsutil.ts";
 
 export interface ManifestEntry {
   source_id: string;
@@ -29,6 +30,21 @@ export class Manifest {
   static async open(lane: Service): Promise<Manifest> {
     await ensureStateDirs();
     return new Manifest(`${MANIFEST_DIR}/${lane}.sqlite`);
+  }
+
+  /**
+   * If the local manifest at `${MANIFEST_DIR}/${lane}.sqlite` is missing but the destination
+   * has a `.manifest.sqlite` snapshot, copy it into place so the next run resumes from it
+   * (much cheaper than --rebuild). Returns true if a restore happened.
+   */
+  static async restoreFromSnapshot(lane: Service, dest: string): Promise<boolean> {
+    const localPath = `${MANIFEST_DIR}/${lane}.sqlite`;
+    if (await Bun.file(localPath).exists()) return false;
+    const snap = `${dest}/${lane}/.manifest.sqlite`;
+    if (!(await Bun.file(snap).exists())) return false;
+    await ensureStateDirs();
+    await copyFile(snap, localPath);
+    return true;
   }
 
   constructor(path: string) {
@@ -85,6 +101,50 @@ export class Manifest {
 
   clear(): void {
     this.db.exec("DELETE FROM entries");
+  }
+
+  /**
+   * End-of-run snapshot: write a frozen `.manifest.sqlite` (via VACUUM INTO, atomic + WAL-flushed)
+   * and a sibling `.manifest.json` export to `<dest>/<lane>/`. Safe to call while the DB is open;
+   * VACUUM INTO writes a fresh, fully-checkpointed copy of the schema/data.
+   */
+  async snapshot(lane: Service, dest: string): Promise<void> {
+    const laneDir = `${dest}/${lane}`;
+    await mkdirp(laneDir);
+
+    const sqliteDst = `${laneDir}/.manifest.sqlite`;
+    const sqliteTmp = `${sqliteDst}.tmp.${process.pid}.${Date.now()}`;
+    try {
+      await unlink(sqliteTmp);
+    } catch {}
+    this.db.exec(`VACUUM INTO '${sqliteTmp.replace(/'/g, "''")}'`);
+    try {
+      await rename(sqliteTmp, sqliteDst);
+    } catch (err) {
+      try {
+        await unlink(sqliteTmp);
+      } catch {}
+      throw err;
+    }
+
+    const rows = this.allStmt.all();
+    const json = {
+      lane,
+      generatedAt: new Date().toISOString(),
+      count: rows.length,
+      entries: rows,
+    };
+    const jsonDst = `${laneDir}/.manifest.json`;
+    const jsonTmp = `${jsonDst}.tmp.${process.pid}.${Date.now()}`;
+    try {
+      await Bun.write(jsonTmp, `${JSON.stringify(json, null, 2)}\n`);
+      await rename(jsonTmp, jsonDst);
+    } catch (err) {
+      try {
+        await unlink(jsonTmp);
+      } catch {}
+      throw err;
+    }
   }
 
   close(): void {

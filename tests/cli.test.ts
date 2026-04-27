@@ -60,4 +60,9 @@ describe("CLI flag parsing", () => {
     expect(() => parseFlags(["--concurrency", "abc"])).toThrow();
     expect(() => parseFlags(["--concurrency", "1.5"])).toThrow();
   });
+
+  test("snapshot defaults to true; --no-manifest-snapshot turns it off", () => {
+    expect(parseFlags(["--all", "/x"]).snapshot).toBe(true);
+    expect(parseFlags(["--all", "/x", "--no-manifest-snapshot"]).snapshot).toBe(false);
+  });
 });

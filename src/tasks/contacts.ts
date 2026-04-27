@@ -9,11 +9,13 @@ import type { ProgressEvent } from "../tui.ts";
 export interface ContactsCfg {
   dest: string;
   concurrency: number;
+  snapshot?: boolean;
 }
 
 export async function* runContacts({
   dest,
   concurrency,
+  snapshot = true,
 }: ContactsCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/contacts`;
   const mf = await Manifest.open("contacts");
@@ -95,6 +97,7 @@ export async function* runContacts({
     for await (const ev of queue) yield ev;
     await poolDone;
 
+    if (snapshot) await mf.snapshot("contacts", dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

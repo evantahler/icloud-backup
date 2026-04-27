@@ -8,6 +8,7 @@ import type { Lane, Service } from "./config.ts";
 import { validateDestination } from "./config.ts";
 import { explainAccessError, runDoctor } from "./doctor.ts";
 import { acquireLock, LockError } from "./lock.ts";
+import { Manifest } from "./manifest.ts";
 import { runContacts } from "./tasks/contacts.ts";
 import { runDrive } from "./tasks/drive.ts";
 import { runNotes } from "./tasks/notes.ts";
@@ -16,10 +17,13 @@ import type { TuiHandle } from "./tui.ts";
 import { createTui, type ProgressEvent } from "./tui.ts";
 import { maybeCheckForUpdate } from "./update/background.ts";
 
-const TASK_FNS: Record<
-  Service,
-  (cfg: { dest: string; concurrency: number }) => AsyncIterable<ProgressEvent>
-> = {
+interface TaskCfg {
+  dest: string;
+  concurrency: number;
+  snapshot?: boolean;
+}
+
+const TASK_FNS: Record<Service, (cfg: TaskCfg) => AsyncIterable<ProgressEvent>> = {
   photos: runPhotos,
   drive: runDrive,
   notes: runNotes,
@@ -66,13 +70,35 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
 
   const updateNoticePromise = maybeCheckForUpdate();
 
+  // Bootstrap: if a lane's local manifest is missing but a destination snapshot exists,
+  // hydrate from it (much cheaper than --rebuild). Run before lanes start so they pick it up.
+  for (const lane of flags.lanes) {
+    try {
+      if (await Manifest.restoreFromSnapshot(lane.service, lane.dest)) {
+        console.log(
+          pc.dim(
+            `Restored ${lane.service} manifest from ${lane.dest}/${lane.service}/.manifest.sqlite`,
+          ),
+        );
+      }
+    } catch (err) {
+      console.error(
+        pc.yellow(`! ${lane.service} snapshot restore failed: ${(err as Error).message}`),
+      );
+    }
+  }
+
   const tui = createTui(flags.lanes.map((l) => l.service));
   const startedAt = Date.now();
   const results = await Promise.allSettled(
     flags.lanes.map((lane) =>
       consume(
         lane.service,
-        TASK_FNS[lane.service]({ dest: lane.dest, concurrency: flags.concurrency }),
+        TASK_FNS[lane.service]({
+          dest: lane.dest,
+          concurrency: flags.concurrency,
+          snapshot: flags.snapshot,
+        }),
         tui,
       ),
     ),
