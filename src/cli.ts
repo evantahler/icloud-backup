@@ -26,7 +26,12 @@ export function buildProgram(): Command {
     .addOption(new Option("--contacts <path>", "back up Apple Contacts as JSON"))
     .addOption(new Option("--all <path>", "shorthand for all four services"))
     .addOption(new Option("--doctor", "run preflight checks and exit"))
-    .addOption(new Option("--rebuild", "walk destinations and rebuild manifests"))
+    .addOption(
+      new Option(
+        "--rebuild",
+        "rebuild manifests from destination contents (or clear them if destination is empty — forces full re-sync next run)",
+      ),
+    )
     .addOption(
       new Option(
         "--no-manifest-snapshot",

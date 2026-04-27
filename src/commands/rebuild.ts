@@ -21,6 +21,15 @@ async function rebuildLane(service: Service, dest: string): Promise<number> {
   mf.clear();
 
   try {
+    if (!(await isDirectory(root))) {
+      console.log(
+        pc.yellow(
+          `  ${service}: ${root} not found — manifest cleared; next run will re-copy everything`,
+        ),
+      );
+      return 0;
+    }
+
     let count = 0;
     for await (const entry of walkServiceDest(service, root)) {
       mf.upsert(entry);
@@ -32,12 +41,21 @@ async function rebuildLane(service: Service, dest: string): Promise<number> {
   }
 }
 
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    const st = await stat(path);
+    return st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function isManifestSnapshot(rel: string): boolean {
   const base = rel.split("/").pop();
   return base === ".manifest.sqlite" || base === ".manifest.json";
 }
 
-async function* walkServiceDest(
+export async function* walkServiceDest(
   service: Service,
   root: string,
 ): AsyncIterable<{
@@ -48,6 +66,8 @@ async function* walkServiceDest(
   backed_up_at: number;
   version: number;
 }> {
+  if (!(await isDirectory(root))) return;
+
   switch (service) {
     case "drive": {
       const glob = new Glob("**/*");
