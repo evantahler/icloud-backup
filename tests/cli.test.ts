@@ -43,6 +43,24 @@ describe("CLI flag parsing", () => {
     expect(f.rebuild).toBe(false);
   });
 
+  test("--concurrency defaults to 5", () => {
+    expect(parseFlags([]).concurrency).toBe(5);
+  });
+
+  test("--concurrency parses an integer", () => {
+    expect(parseFlags(["--concurrency", "10"]).concurrency).toBe(10);
+    expect(parseFlags(["--concurrency", "1"]).concurrency).toBe(1);
+    expect(parseFlags(["--concurrency", "64"]).concurrency).toBe(64);
+  });
+
+  test("--concurrency rejects out-of-range and non-integer values", () => {
+    expect(() => parseFlags(["--concurrency", "0"])).toThrow();
+    expect(() => parseFlags(["--concurrency", "-1"])).toThrow();
+    expect(() => parseFlags(["--concurrency", "65"])).toThrow();
+    expect(() => parseFlags(["--concurrency", "abc"])).toThrow();
+    expect(() => parseFlags(["--concurrency", "1.5"])).toThrow();
+  });
+
   test("snapshot defaults to true; --no-manifest-snapshot turns it off", () => {
     expect(parseFlags(["--all", "/x"]).snapshot).toBe(true);
     expect(parseFlags(["--all", "/x", "--no-manifest-snapshot"]).snapshot).toBe(false);

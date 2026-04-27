@@ -84,6 +84,29 @@ describe("Manifest", () => {
     mf2.close();
   });
 
+  test("50 concurrent upserts all land", async () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        Promise.resolve().then(() =>
+          mf.upsert({
+            source_id: `id-${i}`,
+            dest_path: `/x/${i}`,
+            source_key: `k-${i}`,
+            size_bytes: i,
+            backed_up_at: i,
+            version: 1,
+          }),
+        ),
+      ),
+    );
+    expect(mf.all()).toHaveLength(50);
+    for (let i = 0; i < 50; i++) {
+      expect(mf.get(`id-${i}`)?.size_bytes).toBe(i);
+    }
+    mf.close();
+  });
+
   test("clear empties the table", () => {
     const mf = new Manifest(`${tmp}/m.sqlite`);
     mf.upsert({
