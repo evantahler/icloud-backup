@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { type Contact, Contacts } from "macos-ts";
+import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicWrite, fileExists } from "../copier.ts";
 import { sanitizeFilename, sha256 } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
@@ -7,11 +8,13 @@ import type { ProgressEvent } from "../tui.ts";
 
 export interface ContactsCfg {
   dest: string;
+  concurrency: number;
   snapshot?: boolean;
 }
 
 export async function* runContacts({
   dest,
+  concurrency,
   snapshot = true,
 }: ContactsCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/contacts`;
@@ -23,56 +26,76 @@ export async function* runContacts({
     const all = db.contacts({ sortBy: "displayName", order: "asc" });
     yield { type: "total", files: all.length };
 
+    const queue = new EventQueue<ProgressEvent>();
+    let completed = 0;
     let filesTransferred = 0;
     let bytesTransferred = 0;
 
-    for (let i = 0; i < all.length; i++) {
-      const c = all[i] as Contact;
+    const processOne = async (c: Contact): Promise<void> => {
       const idStr = `${c.id}`;
       const display = c.displayName || `${c.firstName} ${c.lastName}`.trim() || `contact-${c.id}`;
+      let bytesDelta = 0;
 
-      let details: ReturnType<typeof db.getContact>;
       try {
-        details = db.getContact(c.id);
+        let details: ReturnType<typeof db.getContact>;
+        try {
+          details = db.getContact(c.id);
+        } catch (err) {
+          queue.push({
+            type: "log",
+            level: "warn",
+            message: `getContact failed: ${display} (${(err as Error).message})`,
+          });
+          return;
+        }
+
+        const canonical = stableStringify(details);
+        const sourceKey = sha256(canonical);
+        const existing = mf.get(idStr);
+        const out = join(root, `${sanitizeFilename(display)}-${c.id}.json`);
+
+        if (
+          existing &&
+          existing.source_key === sourceKey &&
+          (await fileExists(existing.dest_path))
+        ) {
+          return;
+        }
+
+        const version = (existing?.version ?? 0) + 1;
+        if (existing) await archiveOverwrite(existing.dest_path, existing.version, root);
+
+        const pretty = `${JSON.stringify(details, null, 2)}\n`;
+        const bytes = await atomicWrite(out, pretty);
+
+        mf.upsert({
+          source_id: idStr,
+          dest_path: out,
+          source_key: sourceKey,
+          size_bytes: bytes,
+          backed_up_at: Date.now(),
+          version,
+        });
+
+        bytesDelta = bytes;
+        filesTransferred++;
+        bytesTransferred += bytes;
       } catch (err) {
-        yield {
+        queue.push({
           type: "log",
           level: "warn",
-          message: `getContact failed: ${display} (${(err as Error).message})`,
-        };
-        yield { type: "file", name: display, bytesDelta: 0, index: i + 1 };
-        continue;
+          message: `${display}: ${(err as Error).message}`,
+        });
+      } finally {
+        completed++;
+        queue.push({ type: "file", name: display, bytesDelta, index: completed });
       }
+    };
 
-      const canonical = stableStringify(details);
-      const sourceKey = sha256(canonical);
-      const existing = mf.get(idStr);
-      const out = join(root, `${sanitizeFilename(display)}-${c.id}.json`);
+    const poolDone = runPool(all, concurrency, processOne).finally(() => queue.close());
 
-      if (existing && existing.source_key === sourceKey && (await fileExists(existing.dest_path))) {
-        yield { type: "file", name: display, bytesDelta: 0, index: i + 1 };
-        continue;
-      }
-
-      const version = (existing?.version ?? 0) + 1;
-      if (existing) await archiveOverwrite(existing.dest_path, existing.version, root);
-
-      const pretty = `${JSON.stringify(details, null, 2)}\n`;
-      const bytes = await atomicWrite(out, pretty);
-
-      mf.upsert({
-        source_id: idStr,
-        dest_path: out,
-        source_key: sourceKey,
-        size_bytes: bytes,
-        backed_up_at: Date.now(),
-        version,
-      });
-
-      filesTransferred++;
-      bytesTransferred += bytes;
-      yield { type: "file", name: display, bytesDelta: bytes, index: i + 1 };
-    }
+    for await (const ev of queue) yield ev;
+    await poolDone;
 
     if (snapshot) await mf.snapshot("contacts", dest);
     yield { type: "done", filesTransferred, bytesTransferred };

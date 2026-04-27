@@ -19,6 +19,7 @@ import { maybeCheckForUpdate } from "./update/background.ts";
 
 interface TaskCfg {
   dest: string;
+  concurrency: number;
   snapshot?: boolean;
 }
 
@@ -93,7 +94,11 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
     flags.lanes.map((lane) =>
       consume(
         lane.service,
-        TASK_FNS[lane.service]({ dest: lane.dest, snapshot: flags.snapshot }),
+        TASK_FNS[lane.service]({
+          dest: lane.dest,
+          concurrency: flags.concurrency,
+          snapshot: flags.snapshot,
+        }),
         tui,
       ),
     ),
