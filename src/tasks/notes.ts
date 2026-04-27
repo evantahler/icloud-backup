@@ -81,6 +81,7 @@ export async function* runNotes({
         }
 
         let attachmentBytes = 0;
+        let attachmentFiles = 0;
         // identifier → relative path (from the .md) of the copied attachment.
         // Populated as we copy; consumed by attachmentLinkBuilder when rendering.
         const linkMap = new Map<string, string>();
@@ -111,6 +112,7 @@ export async function* runNotes({
           const aOut = join(attachmentsDir, safeName);
           try {
             attachmentBytes += await atomicCopy(src, aOut);
+            attachmentFiles++;
             if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
           } catch (err) {
             queue.push({
@@ -152,7 +154,7 @@ export async function* runNotes({
         });
 
         bytesDelta = mdBytes + attachmentBytes;
-        filesTransferred++;
+        filesTransferred += 1 + attachmentFiles;
         bytesTransferred += bytesDelta;
       } catch (err) {
         queue.push({
