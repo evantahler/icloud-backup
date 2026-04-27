@@ -7,7 +7,7 @@
       "dependencies": {
         "cli-progress": "^3.12.0",
         "commander": "^14.0.0",
-        "macos-ts": "^0.9.3",
+        "macos-ts": "^0.10.1",
         "picocolors": "^1.1.1",
       },
       "devDependencies": {
@@ -181,7 +181,7 @@
 
     "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
 
-    "macos-ts": ["macos-ts@0.9.3", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "protobufjs": "^8.0.1" }, "peerDependencies": { "typescript": "^5" }, "bin": { "macos-mcp": "src/mcp-server.ts" } }, "sha512-NVlr2lNGripfbT+EmZSUhfq9z8ABfMdlruaRdBHrlpHOMTpCqB4vubAps1xh3QLjzirmpSp2dB7QGxXXeireaw=="],
+    "macos-ts": ["macos-ts@0.10.1", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "protobufjs": "^8.0.1" }, "peerDependencies": { "typescript": "^5" }, "bin": { "macos-mcp": "src/mcp-server.ts" } }, "sha512-mAWz/zuaVOsJpj3iBzPguZ8omARWkA/6vhSr/EOCGX//9LpiZDIkp7OFMIXgVRffs8U+WjA7grM00s+jNvDvxg=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 

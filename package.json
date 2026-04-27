@@ -38,9 +38,9 @@
   "author": "Evan Tahler",
   "license": "MIT",
   "dependencies": {
-    "macos-ts": "^0.9.3",
     "cli-progress": "^3.12.0",
     "commander": "^14.0.0",
+    "macos-ts": "^0.10.1",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {

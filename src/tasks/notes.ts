@@ -1,9 +1,9 @@
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type NoteMeta, Notes } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { fileUrlToPath, sanitizeFilename } from "../fsutil.ts";
+import { sanitizeFilename } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 
@@ -75,31 +75,40 @@ export async function* runNotes({
           }
         }
 
-        let content: string;
-        try {
-          content = db.read(note.id).markdown;
-        } catch (err) {
-          queue.push({
-            type: "log",
-            level: "warn",
-            message: `read failed: ${display} (${(err as Error).message})`,
-          });
-          return;
-        }
-
-        const mdBytes = await atomicWrite(out, content);
         let attachmentBytes = 0;
+        // identifier → relative path (from the .md) of the copied attachment.
+        // Populated as we copy; consumed by attachmentLinkBuilder when rendering.
+        const linkMap = new Map<string, string>();
+        const attachmentsDirName = basename(attachmentsDir);
 
         const attachments = db.listAttachments(note.id);
         if (attachments.length > 0) {
           for (const a of attachments) {
-            const url = a.url ?? db.getAttachmentUrl(`${a.id}`);
-            if (!url) continue;
-            const src = fileUrlToPath(url);
-            if (!(await fileExists(src))) continue;
-            const aOut = join(attachmentsDir, sanitizeFilename(a.name || `attachment-${a.id}`));
+            if (!a.url) {
+              const detail = db.resolveAttachment(a.identifier || a.name);
+              const reason = "error" in detail ? detail.error : "unknown";
+              queue.push({
+                type: "log",
+                level: "warn",
+                message: `attachment unresolved (${reason}): ${display}/${a.name || `(no name, id=${a.id})`} (identifier=${a.identifier || "(empty)"}, type=${a.contentType})`,
+              });
+              continue;
+            }
+            // Strip the file:// scheme that macos-ts always returns.
+            const src = a.url.startsWith("file://") ? a.url.slice("file://".length) : a.url;
+            if (!(await fileExists(src))) {
+              queue.push({
+                type: "log",
+                level: "warn",
+                message: `attachment source missing: ${display}/${a.name}: ${src}`,
+              });
+              continue;
+            }
+            const safeName = sanitizeFilename(a.name || `attachment-${a.id}`);
+            const aOut = join(attachmentsDir, safeName);
             try {
               attachmentBytes += await atomicCopy(src, aOut);
+              if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
             } catch (err) {
               queue.push({
                 type: "log",
@@ -111,6 +120,24 @@ export async function* runNotes({
         } else if (await fileExists(attachmentsDir)) {
           await rm(attachmentsDir, { recursive: true, force: true });
         }
+
+        let content: string;
+        try {
+          content = db.read(note.id, {
+            attachmentLinkBuilder: (info) =>
+              linkMap.get(info.identifier) ??
+              `attachment:${info.identifier}?type=${info.contentType}`,
+          }).markdown;
+        } catch (err) {
+          queue.push({
+            type: "log",
+            level: "warn",
+            message: `read failed: ${display} (${(err as Error).message})`,
+          });
+          return;
+        }
+
+        const mdBytes = await atomicWrite(out, content);
 
         mf.upsert({
           source_id: idStr,
