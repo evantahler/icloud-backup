@@ -16,7 +16,10 @@ import type { TuiHandle } from "./tui.ts";
 import { createTui, type ProgressEvent } from "./tui.ts";
 import { maybeCheckForUpdate } from "./update/background.ts";
 
-const TASK_FNS: Record<Service, (cfg: { dest: string }) => AsyncIterable<ProgressEvent>> = {
+const TASK_FNS: Record<
+  Service,
+  (cfg: { dest: string; concurrency: number }) => AsyncIterable<ProgressEvent>
+> = {
   photos: runPhotos,
   drive: runDrive,
   notes: runNotes,
@@ -67,7 +70,11 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
   const startedAt = Date.now();
   const results = await Promise.allSettled(
     flags.lanes.map((lane) =>
-      consume(lane.service, TASK_FNS[lane.service]({ dest: lane.dest }), tui),
+      consume(
+        lane.service,
+        TASK_FNS[lane.service]({ dest: lane.dest, concurrency: flags.concurrency }),
+        tui,
+      ),
     ),
   );
   tui.stop();

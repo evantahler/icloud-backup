@@ -9,7 +9,10 @@ export interface ParsedFlags {
   rebuild: boolean;
   checkUpdate: boolean;
   upgrade: boolean;
+  concurrency: number;
 }
+
+export const DEFAULT_CONCURRENCY = 5;
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -27,6 +30,20 @@ export function buildProgram(): Command {
     .addOption(new Option("--rebuild", "walk destinations and rebuild manifests"))
     .addOption(new Option("--check-update", "force a fresh npm-registry check"))
     .addOption(new Option("--upgrade", "upgrade to the latest published version"))
+    .addOption(
+      new Option(
+        "--concurrency <n>",
+        `files in flight per lane (1..64, default ${DEFAULT_CONCURRENCY})`,
+      )
+        .argParser((v) => {
+          const n = Number.parseInt(v, 10);
+          if (!Number.isFinite(n) || String(n) !== v.trim() || n < 1 || n > 64) {
+            throw new Error("--concurrency must be an integer between 1 and 64");
+          }
+          return n;
+        })
+        .default(DEFAULT_CONCURRENCY),
+    )
     .addHelpText(
       "after",
       `
@@ -63,6 +80,7 @@ export function flagsFromOpts(opts: Record<string, unknown>): ParsedFlags {
     rebuild: !!opts.rebuild,
     checkUpdate: !!opts.checkUpdate,
     upgrade: !!opts.upgrade,
+    concurrency: typeof opts.concurrency === "number" ? opts.concurrency : DEFAULT_CONCURRENCY,
   };
 }
 
