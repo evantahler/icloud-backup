@@ -1,4 +1,5 @@
 import pkg from "../../package.json" with { type: "json" };
+import { type InstallMethod, UPDATE_CHECK_TTL_MS } from "../constants.ts";
 
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${pkg.name}/latest`;
 const GITHUB_REPO = pkg.repository.url
@@ -18,11 +19,6 @@ export interface UpdateCache {
   hasUpdate: boolean;
   changelog?: string;
 }
-
-export type InstallMethod = "npm" | "bun" | "binary" | "local-dev";
-
-export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
-export const UPDATE_CHECK_TIMEOUT_MS = 3000;
 
 export function isNewerVersion(current: string, latest: string): boolean {
   return Bun.semver.order(current, latest) === -1;

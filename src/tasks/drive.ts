@@ -1,5 +1,5 @@
+import { DRIVE_ROOTS, HOME } from "../constants.ts";
 import { archiveOverwrite, atomicCopy, fileExists } from "../copier.ts";
-import { HOME } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import { run } from "../spawn.ts";
 import type { ProgressEvent } from "../tui.ts";
@@ -9,8 +9,6 @@ export interface DriveCfg {
   dest: string;
   snapshot?: boolean;
 }
-
-const DRIVE_ROOTS = ["Desktop", "Documents"] as const;
 
 export async function* runDrive({ dest, snapshot = true }: DriveCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/drive`;

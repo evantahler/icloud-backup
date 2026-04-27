@@ -4,8 +4,8 @@ import { buildProgram, flagsFromOpts, type ParsedFlags } from "./cli.ts";
 import { runCheckUpdate } from "./commands/check-update.ts";
 import { runRebuild } from "./commands/rebuild.ts";
 import { runUpgrade } from "./commands/upgrade.ts";
-import type { Lane, Service } from "./config.ts";
-import { validateDestination } from "./config.ts";
+import { MANIFEST_SNAPSHOT_FILE, type Service } from "./constants.ts";
+import { type Lane, validateDestination } from "./destination.ts";
 import { explainAccessError, runDoctor } from "./doctor.ts";
 import { acquireLock, LockError } from "./lock.ts";
 import { Manifest } from "./manifest.ts";
@@ -76,7 +76,7 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
       if (await Manifest.restoreFromSnapshot(lane.service, lane.dest)) {
         console.log(
           pc.dim(
-            `Restored ${lane.service} manifest from ${lane.dest}/${lane.service}/.manifest.sqlite`,
+            `Restored ${lane.service} manifest from ${lane.dest}/${lane.service}/${MANIFEST_SNAPSHOT_FILE}`,
           ),
         );
       }

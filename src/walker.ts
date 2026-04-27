@@ -1,13 +1,14 @@
 import { lstat } from "node:fs/promises";
 import { Glob } from "bun";
+import { MANIFEST_JSON_FILE, MANIFEST_SNAPSHOT_FILE } from "./constants.ts";
 
 const EXCLUDE_NAMES = new Set([
   ".DS_Store",
   ".localized",
   // Our own manifest snapshots — never back them up even if a user nests a destination
   // under a watched source root.
-  ".manifest.sqlite",
-  ".manifest.json",
+  MANIFEST_SNAPSHOT_FILE,
+  MANIFEST_JSON_FILE,
 ]);
 const EXCLUDE_PATH_FRAGMENTS = ["/.Trash/", "/.git/", "/node_modules/"];
 

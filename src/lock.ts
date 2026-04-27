@@ -1,5 +1,6 @@
 import { closeSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
-import { ensureStateDirs, LOCK_PATH } from "./fsutil.ts";
+import { LOCK_PATH } from "./constants.ts";
+import { ensureStateDirs } from "./fsutil.ts";
 
 export class LockError extends Error {
   constructor(message: string) {

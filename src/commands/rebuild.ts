@@ -2,7 +2,13 @@ import { stat } from "node:fs/promises";
 import { Glob } from "bun";
 import { Contacts, Notes } from "macos-ts";
 import pc from "picocolors";
-import type { Lane, Service } from "../config.ts";
+import {
+  MANIFEST_JSON_FILE,
+  MANIFEST_SNAPSHOT_FILE,
+  OVERWRITTEN_DIR,
+  type Service,
+} from "../constants.ts";
+import type { Lane } from "../destination.ts";
 import { sha256 } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 
@@ -34,7 +40,7 @@ async function rebuildLane(service: Service, dest: string): Promise<number> {
 
 function isManifestSnapshot(rel: string): boolean {
   const base = rel.split("/").pop();
-  return base === ".manifest.sqlite" || base === ".manifest.json";
+  return base === MANIFEST_SNAPSHOT_FILE || base === MANIFEST_JSON_FILE;
 }
 
 async function* walkServiceDest(
@@ -52,7 +58,7 @@ async function* walkServiceDest(
     case "drive": {
       const glob = new Glob("**/*");
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
-        if (rel.startsWith("_overwritten/")) continue;
+        if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
         if (isManifestSnapshot(rel)) continue;
         const abs = `${root}/${rel}`;
         const st = await stat(abs);
@@ -71,7 +77,7 @@ async function* walkServiceDest(
     case "photos": {
       const glob = new Glob("**/*.json");
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
-        if (rel.startsWith("_overwritten/")) continue;
+        if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
         if (isManifestSnapshot(rel)) continue;
         const sidecar = `${root}/${rel}`;
         const original = sidecar.slice(0, -".json".length);
@@ -108,7 +114,7 @@ async function* walkServiceDest(
 
         const glob = new Glob("**/*.md");
         for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
-          if (rel.startsWith("_overwritten/")) continue;
+          if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
           if (isManifestSnapshot(rel)) continue;
           const abs = `${root}/${rel}`;
           const id = parseTrailingId(rel.replace(/\.md$/, ""));
@@ -135,7 +141,7 @@ async function* walkServiceDest(
       try {
         const glob = new Glob("*.json");
         for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
-          if (rel.startsWith("_overwritten/")) continue;
+          if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
           if (isManifestSnapshot(rel)) continue;
           const abs = `${root}/${rel}`;
           const id = parseTrailingId(rel.replace(/\.json$/, ""));

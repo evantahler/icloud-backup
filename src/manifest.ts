@@ -1,7 +1,12 @@
 import { Database } from "bun:sqlite";
 import { copyFile, rename, unlink } from "node:fs/promises";
-import type { Service } from "./config.ts";
-import { ensureStateDirs, MANIFEST_DIR, mkdirp } from "./fsutil.ts";
+import {
+  MANIFEST_DIR,
+  MANIFEST_JSON_FILE,
+  MANIFEST_SNAPSHOT_FILE,
+  type Service,
+} from "./constants.ts";
+import { ensureStateDirs, mkdirp } from "./fsutil.ts";
 
 export interface ManifestEntry {
   source_id: string;
@@ -40,7 +45,7 @@ export class Manifest {
   static async restoreFromSnapshot(lane: Service, dest: string): Promise<boolean> {
     const localPath = `${MANIFEST_DIR}/${lane}.sqlite`;
     if (await Bun.file(localPath).exists()) return false;
-    const snap = `${dest}/${lane}/.manifest.sqlite`;
+    const snap = `${dest}/${lane}/${MANIFEST_SNAPSHOT_FILE}`;
     if (!(await Bun.file(snap).exists())) return false;
     await ensureStateDirs();
     await copyFile(snap, localPath);
@@ -112,7 +117,7 @@ export class Manifest {
     const laneDir = `${dest}/${lane}`;
     await mkdirp(laneDir);
 
-    const sqliteDst = `${laneDir}/.manifest.sqlite`;
+    const sqliteDst = `${laneDir}/${MANIFEST_SNAPSHOT_FILE}`;
     const sqliteTmp = `${sqliteDst}.tmp.${process.pid}.${Date.now()}`;
     try {
       await unlink(sqliteTmp);
@@ -134,7 +139,7 @@ export class Manifest {
       count: rows.length,
       entries: rows,
     };
-    const jsonDst = `${laneDir}/.manifest.json`;
+    const jsonDst = `${laneDir}/${MANIFEST_JSON_FILE}`;
     const jsonTmp = `${jsonDst}.tmp.${process.pid}.${Date.now()}`;
     try {
       await Bun.write(jsonTmp, `${JSON.stringify(json, null, 2)}\n`);

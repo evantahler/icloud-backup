@@ -1,7 +1,7 @@
 import { Command, Option } from "commander";
 import pkg from "../package.json" with { type: "json" };
-import type { Lane, Service } from "./config.ts";
-import { SERVICES } from "./config.ts";
+import { ENV_NO_UPDATE_CHECK, SERVICES, type Service } from "./constants.ts";
+import type { Lane } from "./destination.ts";
 
 export interface ParsedFlags {
   lanes: Lane[];
@@ -39,7 +39,7 @@ export function buildProgram(): Command {
       "after",
       `
 Environment:
-  ICLOUD_BACKUP_NO_UPDATE_CHECK=1   suppress the background "update available" notice
+  ${ENV_NO_UPDATE_CHECK}=1   suppress the background "update available" notice
 
 Examples:
   $ icloud-backup --doctor
