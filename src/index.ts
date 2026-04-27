@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import pc from "picocolors";
-import { buildProgram, flagsFromOpts, type ParsedFlags } from "./cli.ts";
+import { buildProgram, type Intent } from "./cli.ts";
 import { runCheckUpdate } from "./commands/check-update.ts";
 import { runRebuild } from "./commands/rebuild.ts";
 import { runUpgrade } from "./commands/upgrade.ts";
@@ -47,8 +47,8 @@ async function consume(
   return { files, bytes };
 }
 
-async function runBackup(flags: ParsedFlags): Promise<number> {
-  for (const lane of flags.lanes) {
+async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number): Promise<number> {
+  for (const lane of lanes) {
     try {
       await validateDestination(lane.dest);
     } catch (err) {
@@ -71,8 +71,8 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
   const updateNoticePromise = maybeCheckForUpdate();
 
   // Bootstrap: if a lane's local manifest is missing but a destination snapshot exists,
-  // hydrate from it (much cheaper than --rebuild). Run before lanes start so they pick it up.
-  for (const lane of flags.lanes) {
+  // hydrate from it (much cheaper than `rebuild`). Run before lanes start so they pick it up.
+  for (const lane of lanes) {
     try {
       if (await Manifest.restoreFromSnapshot(lane.service, lane.dest)) {
         console.log(
@@ -88,17 +88,13 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
     }
   }
 
-  const tui = createTui(flags.lanes.map((l) => l.service));
+  const tui = createTui(lanes.map((l) => l.service));
   const startedAt = Date.now();
   const results = await Promise.allSettled(
-    flags.lanes.map((lane) =>
+    lanes.map((lane) =>
       consume(
         lane.service,
-        TASK_FNS[lane.service]({
-          dest: lane.dest,
-          concurrency: flags.concurrency,
-          snapshot: flags.snapshot,
-        }),
+        TASK_FNS[lane.service]({ dest: lane.dest, concurrency, snapshot }),
         tui,
       ),
     ),
@@ -106,13 +102,13 @@ async function runBackup(flags: ParsedFlags): Promise<number> {
   tui.stop();
   release?.();
 
-  printSummary(flags.lanes, results, Date.now() - startedAt);
+  printSummary(lanes, results, Date.now() - startedAt);
 
   const failed = results.some((r) => r.status === "rejected");
   if (failed) {
     for (const [i, r] of results.entries()) {
       if (r.status === "rejected") {
-        const lane = flags.lanes[i] as Lane;
+        const lane = lanes[i] as Lane;
         const explain = explainAccessError(r.reason);
         console.error(pc.red(`✗ [${lane.service}] ${(r.reason as Error)?.message ?? r.reason}`));
         if (explain) console.error(`  ${explain}`);
@@ -159,36 +155,42 @@ function formatBytesLocal(n: number): string {
 }
 
 async function main(): Promise<number> {
-  const program = buildProgram();
+  let intent: Intent | null = null;
+  const program = buildProgram((i) => {
+    intent = i;
+  });
   program.exitOverride();
   try {
     await program.parseAsync(process.argv);
   } catch (err) {
     const code = (err as { code?: string; exitCode?: number }).code;
     if (code === "commander.helpDisplayed" || code === "commander.version") return 0;
-    if (code === "commander.help") return 0;
+    // `commander.help` = help auto-displayed on missing subcommand. Treat as usage error.
+    if (code === "commander.help") return 2;
     return (err as { exitCode?: number }).exitCode ?? 1;
   }
 
-  const flags = flagsFromOpts(program.opts());
-
-  if (flags.checkUpdate) return (await runCheckUpdate()) ? 0 : 1;
-  if (flags.upgrade) return (await runUpgrade()) ? 0 : 1;
-  if (flags.doctor) return (await runDoctor(flags.lanes)) ? 0 : 1;
-  if (flags.rebuild) {
-    if (flags.lanes.length === 0) {
-      console.error(pc.red("--rebuild requires at least one service flag (or --all)"));
-      return 2;
-    }
-    return (await runRebuild(flags.lanes)) ? 0 : 1;
-  }
-
-  if (flags.lanes.length === 0) {
+  if (!intent) {
     program.outputHelp();
     return 2;
   }
 
-  return runBackup(flags);
+  return dispatch(intent);
+}
+
+async function dispatch(intent: Intent): Promise<number> {
+  switch (intent.kind) {
+    case "checkUpdate":
+      return (await runCheckUpdate()) ? 0 : 1;
+    case "upgrade":
+      return (await runUpgrade()) ? 0 : 1;
+    case "doctor":
+      return (await runDoctor(intent.lanes)) ? 0 : 1;
+    case "rebuild":
+      return (await runRebuild(intent.lanes)) ? 0 : 1;
+    case "backup":
+      return runBackup(intent.lanes, intent.snapshot, intent.concurrency);
+  }
 }
 
 main()
