@@ -8,9 +8,11 @@ export async function atomicCopy(src: string, dest: string): Promise<number> {
   await mkdirp(dirname(dest));
   const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
   try {
-    const bytes = await Bun.write(tmp, Bun.file(src));
+    await Bun.write(tmp, Bun.file(src));
     await rename(tmp, dest);
-    return bytes;
+    // Bun.write returns 0 on AFP mounts even when the write succeeds; stat the
+    // landed file so the byte count is accurate everywhere.
+    return (await stat(dest)).size;
   } catch (err) {
     await safeUnlink(tmp);
     throw err;

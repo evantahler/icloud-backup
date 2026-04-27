@@ -47,7 +47,11 @@ export async function* runNotes({
           return;
         }
 
-        const sourceKey = `${note.modifiedAt.getTime()}`;
+        // Fetch attachments before dedup so the source_key reflects attachment
+        // state — otherwise a prior run that silently dropped attachments
+        // (e.g. a stale macos-ts) would leave the manifest looking complete.
+        const attachments = db.listAttachments(note.id);
+        const sourceKey = `${note.modifiedAt.getTime()}|${attachments.length}`;
         const existing = mf.get(idStr);
         const fname = `${sanitizeFilename(note.title || "untitled")}-${note.id}.md`;
         const out = join(
@@ -61,7 +65,8 @@ export async function* runNotes({
         if (
           existing &&
           existing.source_key === sourceKey &&
-          (await fileExists(existing.dest_path))
+          (await fileExists(existing.dest_path)) &&
+          (attachments.length === 0 || (await fileExists(`${existing.dest_path}.attachments`)))
         ) {
           return;
         }
@@ -81,43 +86,41 @@ export async function* runNotes({
         const linkMap = new Map<string, string>();
         const attachmentsDirName = basename(attachmentsDir);
 
-        const attachments = db.listAttachments(note.id);
-        if (attachments.length > 0) {
-          for (const a of attachments) {
-            if (!a.url) {
-              const detail = db.resolveAttachment(a.identifier || a.name);
-              const reason = "error" in detail ? detail.error : "unknown";
-              queue.push({
-                type: "log",
-                level: "warn",
-                message: `attachment unresolved (${reason}): ${display}/${a.name || `(no name, id=${a.id})`} (identifier=${a.identifier || "(empty)"}, type=${a.contentType})`,
-              });
-              continue;
-            }
-            // Strip the file:// scheme that macos-ts always returns.
-            const src = a.url.startsWith("file://") ? a.url.slice("file://".length) : a.url;
-            if (!(await fileExists(src))) {
-              queue.push({
-                type: "log",
-                level: "warn",
-                message: `attachment source missing: ${display}/${a.name}: ${src}`,
-              });
-              continue;
-            }
-            const safeName = sanitizeFilename(a.name || `attachment-${a.id}`);
-            const aOut = join(attachmentsDir, safeName);
-            try {
-              attachmentBytes += await atomicCopy(src, aOut);
-              if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
-            } catch (err) {
-              queue.push({
-                type: "log",
-                level: "warn",
-                message: `attachment copy failed: ${display}/${a.name}: ${(err as Error).message}`,
-              });
-            }
+        for (const a of attachments) {
+          if (!a.url) {
+            const detail = db.resolveAttachment(a.identifier || a.name);
+            const reason = "error" in detail ? detail.error : "unknown";
+            queue.push({
+              type: "log",
+              level: "warn",
+              message: `attachment unresolved (${reason}): ${display}/${a.name || `(no name, id=${a.id})`} (identifier=${a.identifier || "(empty)"}, type=${a.contentType})`,
+            });
+            continue;
           }
-        } else if (await fileExists(attachmentsDir)) {
+          // Strip the file:// scheme that macos-ts always returns.
+          const src = a.url.startsWith("file://") ? a.url.slice("file://".length) : a.url;
+          if (!(await fileExists(src))) {
+            queue.push({
+              type: "log",
+              level: "warn",
+              message: `attachment source missing: ${display}/${a.name}: ${src}`,
+            });
+            continue;
+          }
+          const safeName = sanitizeFilename(a.name || `attachment-${a.id}`);
+          const aOut = join(attachmentsDir, safeName);
+          try {
+            attachmentBytes += await atomicCopy(src, aOut);
+            if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
+          } catch (err) {
+            queue.push({
+              type: "log",
+              level: "warn",
+              message: `attachment copy failed: ${display}/${a.name}: ${(err as Error).message}`,
+            });
+          }
+        }
+        if (attachments.length === 0 && (await fileExists(attachmentsDir))) {
           await rm(attachmentsDir, { recursive: true, force: true });
         }
 
