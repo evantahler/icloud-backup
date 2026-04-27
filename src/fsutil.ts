@@ -1,14 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-
-export const HOME = homedir();
-export const STATE_DIR = `${HOME}/.icloud-backup`;
-export const MANIFEST_DIR = `${STATE_DIR}/manifests`;
-export const LOCK_PATH = `${STATE_DIR}/icloud-backup.lock`;
-export const UPDATE_CACHE_PATH = `${STATE_DIR}/update.json`;
-export const LOG_DIR = `${STATE_DIR}/logs`;
+import { LOG_DIR, MANIFEST_DIR } from "./constants.ts";
 
 export async function mkdirp(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });

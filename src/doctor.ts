@@ -1,8 +1,9 @@
 import { access, constants, lstat, stat } from "node:fs/promises";
 import { Notes } from "macos-ts";
 import pc from "picocolors";
-import type { Lane } from "./config.ts";
-import { ensureStateDirs, HOME, STATE_DIR } from "./fsutil.ts";
+import { DRIVE_ROOTS, HOME, STATE_DIR } from "./constants.ts";
+import type { Lane } from "./destination.ts";
+import { ensureStateDirs } from "./fsutil.ts";
 import { run } from "./spawn.ts";
 
 interface Check {
@@ -69,7 +70,7 @@ async function checkICloudDrive(): Promise<Check> {
     };
   }
 
-  for (const folder of ["Desktop", "Documents"]) {
+  for (const folder of DRIVE_ROOTS) {
     const path = `${HOME}/${folder}`;
     try {
       const st = await lstat(path);

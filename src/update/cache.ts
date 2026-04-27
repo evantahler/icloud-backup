@@ -1,5 +1,6 @@
 import { unlink } from "node:fs/promises";
-import { ensureStateDirs, UPDATE_CACHE_PATH } from "../fsutil.ts";
+import { UPDATE_CACHE_PATH } from "../constants.ts";
+import { ensureStateDirs } from "../fsutil.ts";
 import type { UpdateCache } from "./checker.ts";
 
 export async function loadUpdateCache(): Promise<UpdateCache | undefined> {

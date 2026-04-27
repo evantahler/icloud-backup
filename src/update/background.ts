@@ -1,14 +1,8 @@
 import pc from "picocolors";
 import pkg from "../../package.json" with { type: "json" };
+import { ENV_NO_UPDATE_CHECK, UPDATE_CHECK_TIMEOUT_MS } from "../constants.ts";
 import { loadUpdateCache, saveUpdateCache } from "./cache.ts";
-import {
-  checkForUpdate,
-  needsCheck,
-  UPDATE_CHECK_TIMEOUT_MS,
-  type UpdateCache,
-} from "./checker.ts";
-
-const ENV_OPT_OUT = "ICLOUD_BACKUP_NO_UPDATE_CHECK";
+import { checkForUpdate, needsCheck, type UpdateCache } from "./checker.ts";
 
 function formatNotice(currentVersion: string, latestVersion: string, changelog?: string): string {
   const lines: string[] = [
@@ -28,7 +22,7 @@ function formatNotice(currentVersion: string, latestVersion: string, changelog?:
  */
 export async function maybeCheckForUpdate(): Promise<string | null> {
   try {
-    if (process.env[ENV_OPT_OUT] === "1") return null;
+    if (process.env[ENV_NO_UPDATE_CHECK] === "1") return null;
     if (!process.stderr.isTTY) return null;
 
     const cache = await loadUpdateCache();

@@ -1,5 +1,6 @@
 import { rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
+import { OVERWRITTEN_DIR } from "./constants.ts";
 import { mkdirp, todayIso } from "./fsutil.ts";
 
 /** Copy `src` → `dest` atomically. Returns bytes written. */
@@ -41,7 +42,7 @@ export async function archiveOverwrite(dest: string, version: number, root: stri
   const exists = await fileExists(dest);
   if (!exists) return;
   const rel = relative(root, dest);
-  const archived = join(root, "_overwritten", todayIso(), `v${version}`, rel || basename(dest));
+  const archived = join(root, OVERWRITTEN_DIR, todayIso(), `v${version}`, rel || basename(dest));
   await mkdirp(dirname(archived));
   await rename(dest, archived);
 }

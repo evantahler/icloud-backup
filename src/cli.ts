@@ -1,8 +1,8 @@
 import { Command, Option } from "commander";
 import pc from "picocolors";
 import pkg from "../package.json" with { type: "json" };
-import type { Lane, Service } from "./config.ts";
-import { SERVICES } from "./config.ts";
+import { ENV_NO_UPDATE_CHECK, SERVICES, type Service } from "./constants.ts";
+import type { Lane } from "./destination.ts";
 
 export const DEFAULT_CONCURRENCY = 5;
 
@@ -35,7 +35,7 @@ export function buildProgram(onIntent: (intent: Intent) => void): Command {
     "after",
     `
 ${pc.bold(pc.cyan("Environment:"))}
-  ${pc.yellow("ICLOUD_BACKUP_NO_UPDATE_CHECK=1")}   suppress the background "update available" notice
+  ${pc.yellow(`${ENV_NO_UPDATE_CHECK}=1`)}   suppress the background "update available" notice
 
 ${pc.bold(pc.cyan("Examples:"))}
   $ icloud-backup ${pc.green("doctor")}

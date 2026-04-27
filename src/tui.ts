@@ -1,6 +1,6 @@
 import cliProgress from "cli-progress";
 import pc from "picocolors";
-import type { Service } from "./config.ts";
+import { LANE_COLOR, type Service } from "./constants.ts";
 import { formatBytes } from "./fsutil.ts";
 
 export type ProgressEvent =
@@ -9,13 +9,6 @@ export type ProgressEvent =
   | { type: "file"; name: string; bytesDelta: number; index: number }
   | { type: "log"; level: "info" | "warn"; message: string }
   | { type: "done"; filesTransferred: number; bytesTransferred: number };
-
-const LANE_COLOR: Record<Service, (s: string) => string> = {
-  photos: pc.yellow,
-  drive: pc.cyan,
-  notes: pc.magenta,
-  contacts: pc.green,
-};
 
 interface LaneState {
   service: Service;

@@ -1,7 +1,5 @@
 import { access, constants, stat } from "node:fs/promises";
-
-export type Service = "photos" | "drive" | "notes" | "contacts";
-export const SERVICES: readonly Service[] = ["photos", "drive", "notes", "contacts"] as const;
+import type { Service } from "./constants.ts";
 
 export interface Lane {
   service: Service;
