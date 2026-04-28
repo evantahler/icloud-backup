@@ -1,7 +1,14 @@
 import { EventQueue, runPool } from "../concurrency.ts";
 import { DRIVE_ROOTS, HOME } from "../constants.ts";
-import { archiveOverwrite, atomicCopy, fileExists } from "../copier.ts";
-import { errCode, errReason, sanitizeRelativePath } from "../fsutil.ts";
+import { archiveOverwrite, atomicCopy, fileExists, TEMP_SUFFIX_BYTES } from "../copier.ts";
+import {
+  DEFAULT_MAX_FILENAME_BYTES,
+  errCode,
+  errReason,
+  mkdirp,
+  probeMaxFilenameBytes,
+  sanitizeRelativePath,
+} from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import { run } from "../spawn.ts";
 import type { ProgressEvent } from "../tui.ts";
@@ -22,6 +29,16 @@ export async function* runDrive({
   const mf = await Manifest.open("drive");
 
   try {
+    yield { type: "phase", label: "probing destination" };
+    await mkdirp(root);
+    const probedMax = await probeMaxFilenameBytes(root);
+    const nameCap = Math.min(probedMax - TEMP_SUFFIX_BYTES, DEFAULT_MAX_FILENAME_BYTES);
+    yield {
+      type: "log",
+      level: "info",
+      message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
+    };
+
     yield { type: "phase", label: "materializing iCloud Drive" };
     for (const folder of DRIVE_ROOTS) {
       const path = `${HOME}/${folder}`;
@@ -64,7 +81,7 @@ export async function* runDrive({
       try {
         const sourceKey = `${f.mtimeMs}|${f.size}`;
         const existing = mf.get(f.rel);
-        const safeRel = sanitizeRelativePath(f.rel);
+        const safeRel = sanitizeRelativePath(f.rel, nameCap);
         const out = `${root}/${safeRel}`;
 
         if (

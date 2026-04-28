@@ -2,10 +2,28 @@ import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { type NoteMeta, Notes } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
-import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { errCode, errReason, sanitizeFilename } from "../fsutil.ts";
+import {
+  archiveOverwrite,
+  atomicCopy,
+  atomicWrite,
+  fileExists,
+  TEMP_SUFFIX_BYTES,
+} from "../copier.ts";
+import {
+  DEFAULT_MAX_FILENAME_BYTES,
+  errCode,
+  errReason,
+  mkdirp,
+  probeMaxFilenameBytes,
+  sanitizeFilename,
+} from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
+
+// We append `.attachments` (12 bytes) to a note's `.md` filename to form the
+// sibling attachments directory. Reserve that on top of the temp suffix so the
+// directory rename during atomicCopy of attachments stays under NAME_MAX.
+const NOTE_ATTACHMENT_RESERVE = ".attachments".length;
 
 export interface NotesCfg {
   dest: string;
@@ -42,8 +60,9 @@ export function chooseAttachmentName(
   rawName: string | null | undefined,
   id: number,
   seen: Set<string>,
+  maxBytes?: number,
 ): string {
-  const base = sanitizeFilename(rawName || `attachment-${id}`);
+  const base = sanitizeFilename(rawName || `attachment-${id}`, { maxBytes });
   if (!seen.has(base)) {
     seen.add(base);
     return base;
@@ -71,6 +90,19 @@ export async function* runNotes({
   const db = new Notes();
 
   try {
+    yield { type: "phase", label: "probing destination" };
+    await mkdirp(root);
+    const probedMax = await probeMaxFilenameBytes(root);
+    const nameCap = Math.min(
+      probedMax - TEMP_SUFFIX_BYTES - NOTE_ATTACHMENT_RESERVE,
+      DEFAULT_MAX_FILENAME_BYTES,
+    );
+    yield {
+      type: "log",
+      level: "info",
+      message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
+    };
+
     yield { type: "phase", label: "scanning Notes" };
     const all = db.notes({ sortBy: "modifiedAt", order: "asc" });
     yield { type: "total", files: all.length };
@@ -104,11 +136,14 @@ export async function* runNotes({
         const attachments = db.listAttachments(note.id);
         const sourceKey = `${note.modifiedAt.getTime()}|${attachments.length}`;
         const existing = mf.get(idStr);
-        const fname = `${sanitizeFilename(note.title || "untitled")}-${note.id}.md`;
+        // Reserve room for `-${note.id}.md` so the final filename also fits.
+        const fnameSuffix = `-${note.id}.md`;
+        const titleCap = Math.max(8, nameCap - fnameSuffix.length);
+        const fname = `${sanitizeFilename(note.title || "untitled", { maxBytes: titleCap })}${fnameSuffix}`;
         const out = join(
           root,
-          sanitizeFilename(note.accountName),
-          sanitizeFilename(note.folderName),
+          sanitizeFilename(note.accountName, { maxBytes: nameCap }),
+          sanitizeFilename(note.folderName, { maxBytes: nameCap }),
           fname,
         );
         const attachmentsDir = `${out}.attachments`;
@@ -179,7 +214,7 @@ export async function* runNotes({
             advanceProgress();
             continue;
           }
-          const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames);
+          const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames, nameCap);
           const aOut = join(attachmentsDir, safeName);
           try {
             attachmentBytes += await atomicCopy(src, aOut, (frac) => {

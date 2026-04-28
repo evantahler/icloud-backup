@@ -2,10 +2,28 @@ import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { type PhotoMeta, Photos } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
-import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { fileUrlToPath, pad2, sanitizeFilename } from "../fsutil.ts";
+import {
+  archiveOverwrite,
+  atomicCopy,
+  atomicWrite,
+  fileExists,
+  TEMP_SUFFIX_BYTES,
+} from "../copier.ts";
+import {
+  DEFAULT_MAX_FILENAME_BYTES,
+  fileUrlToPath,
+  mkdirp,
+  pad2,
+  probeMaxFilenameBytes,
+  sanitizeFilename,
+} from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
+
+// Reserved on top of the temp suffix so the heaviest sidecar we write
+// (`<base>.json` via atomicWrite) still fits: `.json` = 5 bytes, plus the
+// per-write temp suffix.
+const PHOTO_SIDECAR_RESERVE = 5;
 
 export interface PhotosCfg {
   dest: string;
@@ -23,6 +41,19 @@ export async function* runPhotos({
   const db = new Photos();
 
   try {
+    yield { type: "phase", label: "probing destination" };
+    await mkdirp(root);
+    const probedMax = await probeMaxFilenameBytes(root);
+    const nameCap = Math.min(
+      probedMax - TEMP_SUFFIX_BYTES - PHOTO_SIDECAR_RESERVE,
+      DEFAULT_MAX_FILENAME_BYTES,
+    );
+    yield {
+      type: "log",
+      level: "info",
+      message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
+    };
+
     yield { type: "phase", label: "scanning Photos library" };
     const all = db.photos({ sortBy: "dateCreated", order: "asc" });
     yield { type: "total", files: all.length };
@@ -36,7 +67,7 @@ export async function* runPhotos({
     const processOne = async (p: PhotoMeta): Promise<void> => {
       const idStr = `${p.id}`;
       let bytesDelta = 0;
-      const safeName = sanitizeFilename(p.filename);
+      const safeName = sanitizeFilename(p.filename, { maxBytes: nameCap });
       const displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${safeName}`;
       const id = ++nextId;
       queue.push({ type: "start", name: displayName, id });

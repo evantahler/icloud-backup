@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   errCode,
   errReason,
@@ -6,6 +9,7 @@ import {
   formatBytes,
   formatDuration,
   pad2,
+  probeMaxFilenameBytes,
   sanitizeFilename,
   sanitizeRelativePath,
   sha256,
@@ -22,10 +26,18 @@ describe("sanitizeFilename", () => {
   test("strips leading dots", () => {
     expect(sanitizeFilename("...secret")).toBe("_secret");
   });
-  test("truncates to 200 bytes", () => {
+  test("truncates to 200 bytes by default", () => {
     const s = "a".repeat(300);
     expect(sanitizeFilename(s).length).toBe(200);
     expect(Buffer.byteLength(sanitizeFilename(s), "utf8")).toBe(200);
+  });
+  test("respects maxBytes override (e.g. for stricter SMB destinations)", () => {
+    const s = "a".repeat(300);
+    expect(sanitizeFilename(s, { maxBytes: 120 }).length).toBe(120);
+    expect(Buffer.byteLength(sanitizeFilename(s, { maxBytes: 120 }), "utf8")).toBe(120);
+  });
+  test("respects fallback override", () => {
+    expect(sanitizeFilename("", { fallback: "anon" })).toBe("anon");
   });
   test("byte-caps multibyte names so emoji-heavy names don't blow the AFP limit", () => {
     // Each 🦘 is 4 UTF-8 bytes; 100 of them = 400 bytes, way over AFP's 255.
@@ -86,6 +98,45 @@ describe("sanitizeRelativePath", () => {
   });
   test("single-segment path round-trips when already valid", () => {
     expect(sanitizeRelativePath("simple.txt")).toBe("simple.txt");
+  });
+  test("propagates maxBytes to each segment independently", () => {
+    const long = "a".repeat(200);
+    const result = sanitizeRelativePath(`dir/${long}/leaf.png`, 100);
+    const parts = result.split("/");
+    expect(Buffer.byteLength(parts[1] ?? "", "utf8")).toBe(100);
+    expect(parts[2]).toBe("leaf.png");
+  });
+});
+
+describe("probeMaxFilenameBytes", () => {
+  test("returns at least the floor when destination is writable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "icloud-backup-probe-"));
+    try {
+      const limit = await probeMaxFilenameBytes(dir, { fallback: 99 });
+      // tmpdir is APFS in CI/local, so should accept the full 255-byte ceiling.
+      // Asserting >=143 keeps the test resilient to CI filesystems while still
+      // verifying the binary search walks meaningfully past the floor.
+      expect(limit).toBeGreaterThanOrEqual(143);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+  test("returns fallback when directory does not exist", async () => {
+    const limit = await probeMaxFilenameBytes("/nonexistent/icloud-backup-probe", {
+      fallback: 137,
+    });
+    expect(limit).toBe(137);
+  });
+  test("cleans up its probe files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "icloud-backup-probe-"));
+    try {
+      await probeMaxFilenameBytes(dir);
+      const { readdir } = await import("node:fs/promises");
+      const remaining = await readdir(dir);
+      expect(remaining).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

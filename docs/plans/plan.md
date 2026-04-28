@@ -244,6 +244,34 @@ Startup behavior (lane bootstrap):
 
 Escape hatch: `--no-manifest-snapshot` skips the snapshot write. Off by default; only useful if the destination has a hard reason to reject hidden files (legacy filesystems, pedantic sync tools).
 
+## Filename sanitization
+
+**Policy: destinations target the SMB lowest-common-denominator, not APFS.** A backup that succeeds on a local disk should also succeed when the same destination is moved to a NAS share. Rather than per-filesystem branching, every destination path goes through the same sanitizer.
+
+| Constraint                          | SMB (worst-case observed)        | APFS / HFS+ |
+|-------------------------------------|----------------------------------|-------------|
+| Filename byte length per component  | **143 bytes** (HVTVault probe)\* | 255 bytes   |
+| Total path length                   | 1024 bytes (PATH_MAX)            | 1024 bytes  |
+| Trailing dot or space in name       | rejected                         | allowed     |
+| Reserved chars (`\ : * ? " < > \|`) | rejected                         | allowed     |
+| Filename encoding                   | NFC (UTF-16 on the wire)         | NFD         |
+| Leading dot                         | allowed but hides on Unix        | allowed     |
+
+\* The 143-byte ceiling is server-specific. macOS `smbfs` against a Samba server advertises NAME_MAX=255 via `pathconf` but actual writes can fail far below that — we've observed 143 bytes on HVTVault, and other deployments cap at 255 UTF-16 chars. We don't trust `pathconf`.
+
+**`sanitizeFilename(name, { maxBytes })`** in `src/fsutil.ts` does the per-component work: NFC normalization, reserved-char substitution, trailing-dot strip, byte-cap truncation on a UTF-8 codepoint boundary. **`sanitizeRelativePath(rel, maxBytes)`** runs it per segment with separators preserved.
+
+**`probeMaxFilenameBytes(dir)`** binary-searches the destination at lane startup to find the actual per-component byte limit (writes `.<sessionId>-<aaa...>` probe files in the lane root, unlinks them on the way out). Each lane derives `nameCap = min(probed - laneReserve, 200)`:
+
+| Lane     | Lane reserve                                              |
+|----------|-----------------------------------------------------------|
+| Drive    | `TEMP_SUFFIX_BYTES` (atomicCopy temp file)                |
+| Photos   | `TEMP_SUFFIX_BYTES + 5` (also writes `<base>.json`)       |
+| Notes    | `TEMP_SUFFIX_BYTES + len(".attachments")`                 |
+| Contacts | `TEMP_SUFFIX_BYTES` (the `-<id>.<ext>` suffix is reserved separately from the title cap) |
+
+Default fallback is `DEFAULT_MAX_FILENAME_BYTES` (200) when the probe can't run (perm denied, dir missing). Don't loosen sanitization without keeping the probe — `pathconf` lies.
+
 ## Project layout: `~/workspace/icloud-backup/`
 
 ```

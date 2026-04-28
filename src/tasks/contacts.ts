@@ -1,9 +1,15 @@
 import { join } from "node:path";
 import { type Contact, Contacts } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
-import { archiveOverwrite, atomicWrite, fileExists } from "../copier.ts";
+import { archiveOverwrite, atomicWrite, fileExists, TEMP_SUFFIX_BYTES } from "../copier.ts";
 import { type ContactsFormat, DEFAULT_CONTACTS_FORMAT } from "../destination.ts";
-import { sanitizeFilename, sha256 } from "../fsutil.ts";
+import {
+  DEFAULT_MAX_FILENAME_BYTES,
+  mkdirp,
+  probeMaxFilenameBytes,
+  sanitizeFilename,
+  sha256,
+} from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 import { toVCard } from "../vcard.ts";
@@ -27,6 +33,16 @@ export async function* runContacts({
   const db = new Contacts();
 
   try {
+    yield { type: "phase", label: "probing destination" };
+    await mkdirp(root);
+    const probedMax = await probeMaxFilenameBytes(root);
+    const nameCap = Math.min(probedMax - TEMP_SUFFIX_BYTES, DEFAULT_MAX_FILENAME_BYTES);
+    yield {
+      type: "log",
+      level: "info",
+      message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
+    };
+
     yield { type: "phase", label: "scanning Contacts" };
     const all = db.contacts({ sortBy: "displayName", order: "asc" });
     yield { type: "total", files: all.length };
@@ -60,7 +76,12 @@ export async function* runContacts({
         const canonical = stableStringify(details);
         const sourceKey = sha256(canonical);
         const existing = mf.get(idStr);
-        const out = join(root, `${sanitizeFilename(display)}-${c.id}.${ext}`);
+        const fnameSuffix = `-${c.id}.${ext}`;
+        const titleCap = Math.max(8, nameCap - fnameSuffix.length);
+        const out = join(
+          root,
+          `${sanitizeFilename(display, { maxBytes: titleCap })}${fnameSuffix}`,
+        );
 
         if (
           existing &&
