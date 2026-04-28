@@ -21,6 +21,9 @@ interface LaneState {
   totalBytes: number;
   bytesSoFar: number;
   completedFiles: number;
+  // Files that actually transferred bytes — drives the ETA divisor so
+  // skipped/already-synced items don't poison the rate estimate.
+  copiedFiles: number;
   slotBars: cliProgress.SingleBar[];
   slotIds: Array<number | null>;
   activeCount: number;
@@ -72,6 +75,7 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
       totalBytes: 0,
       bytesSoFar: 0,
       completedFiles: 0,
+      copiedFiles: 0,
       slotBars,
       slotIds: new Array<number | null>(slotCount).fill(null),
       activeCount: 0,
@@ -108,11 +112,11 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
       if (lane.totalFiles === 0) continue;
       if (lane.completedFiles >= lane.totalFiles) continue;
       allDone = false;
-      if (lane.completedFiles === 0 || elapsedMs < 2000) {
+      if (lane.copiedFiles === 0 || elapsedMs < 2000) {
         unknown = true;
         continue;
       }
-      const laneEtaMs = (elapsedMs * (lane.totalFiles - lane.completedFiles)) / lane.completedFiles;
+      const laneEtaMs = (elapsedMs * (lane.totalFiles - lane.completedFiles)) / lane.copiedFiles;
       if (laneEtaMs > maxEtaMs) maxEtaMs = laneEtaMs;
     }
     const eta = allDone ? "" : unknown ? "…" : formatDuration(maxEtaMs);
@@ -178,6 +182,7 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
           lane.activeCount = Math.max(0, lane.activeCount - 1);
           lane.bytesSoFar += event.bytesDelta;
           lane.completedFiles = event.index;
+          if (event.bytesDelta > 0) lane.copiedFiles++;
           lane.bar.update(event.index, {
             bytes: formatBytes(lane.bytesSoFar),
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",
