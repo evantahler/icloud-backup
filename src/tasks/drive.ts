@@ -1,6 +1,7 @@
 import { EventQueue, runPool } from "../concurrency.ts";
 import { DRIVE_ROOTS, HOME } from "../constants.ts";
 import { archiveOverwrite, atomicCopy, fileExists } from "../copier.ts";
+import { errCode, errReason, sanitizeRelativePath } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import { run } from "../spawn.ts";
 import type { ProgressEvent } from "../tui.ts";
@@ -60,7 +61,8 @@ export async function* runDrive({
       try {
         const sourceKey = `${f.mtimeMs}|${f.size}`;
         const existing = mf.get(f.rel);
-        const out = `${root}/${f.rel}`;
+        const safeRel = sanitizeRelativePath(f.rel);
+        const out = `${root}/${safeRel}`;
 
         if (
           existing &&
@@ -77,10 +79,13 @@ export async function* runDrive({
         try {
           bytes = await atomicCopy(f.abs, out);
         } catch (err) {
+          // Errno in the prefix so it survives terminal soft-wrap; the long
+          // destination path in e.message stays at the end where wrapping can
+          // swallow it harmlessly.
           queue.push({
             type: "log",
             level: "warn",
-            message: `copy failed: ${f.rel} (${(err as Error).message})`,
+            message: `[copy-failed/${errCode(err)}] ${f.rel} -> ${safeRel} :: ${errReason(err)}`,
           });
           return;
         }

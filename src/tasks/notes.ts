@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { type NoteMeta, Notes } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { sanitizeFilename } from "../fsutil.ts";
+import { errCode, errReason, sanitizeFilename } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 
@@ -23,16 +23,6 @@ const NON_FILE_ATTACHMENT_TYPES = new Set([
   "com.apple.notes.inlinetextattachment.mention",
   "com.apple.notes.inlinetextattachment.link",
 ]);
-
-function errReason(err: unknown): string {
-  const e = err as NodeJS.ErrnoException;
-  return e?.code ? `${e.code}: ${e.message}` : ((e?.message as string) ?? String(err));
-}
-
-function errCode(err: unknown): string {
-  const e = err as NodeJS.ErrnoException;
-  return e?.code ?? "ERR";
-}
 
 // Errno in the prefix so it survives terminal soft-wrap; the long destination
 // path in e.message stays at the end where wrapping can swallow it harmlessly.

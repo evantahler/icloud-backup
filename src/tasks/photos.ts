@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { type PhotoMeta, Photos } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { fileUrlToPath, pad2 } from "../fsutil.ts";
+import { fileUrlToPath, pad2, sanitizeFilename } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 
@@ -74,13 +74,14 @@ export async function* runPhotos({
 
         const sourceKey = `${Math.floor(st.mtimeMs)}|${st.size}`;
         const existing = mf.get(idStr);
+        const safeName = sanitizeFilename(p.filename);
         const out = join(
           root,
           `${p.dateCreated.getFullYear()}`,
           pad2(p.dateCreated.getMonth() + 1),
-          p.filename,
+          safeName,
         );
-        displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${p.filename}`;
+        displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${safeName}`;
 
         if (
           existing &&
