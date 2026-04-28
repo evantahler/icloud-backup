@@ -29,6 +29,22 @@ function errReason(err: unknown): string {
   return e?.code ? `${e.code}: ${e.message}` : ((e?.message as string) ?? String(err));
 }
 
+function errCode(err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  return e?.code ?? "ERR";
+}
+
+// Errno in the prefix so it survives terminal soft-wrap; the long destination
+// path in e.message stays at the end where wrapping can swallow it harmlessly.
+export function formatCopyFailed(
+  display: string,
+  srcName: string,
+  destName: string,
+  err: unknown,
+): string {
+  return `[copy-failed/${errCode(err)}] ${display} :: ${srcName} -> ${destName} :: ${errReason(err)}`;
+}
+
 // Apple Notes auto-names attachments after the note title, so duplicates
 // within a single note are common. Without disambiguation, atomicCopy would
 // silently rename-clobber earlier files at the same path.
@@ -162,12 +178,10 @@ export async function* runNotes({
             attachmentFiles++;
             if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
           } catch (err) {
-            // Identity left, OS error right: terminals truncate long warn lines
-            // on the right, and the OS error embeds a long destination path.
             queue.push({
               type: "log",
               level: "warn",
-              message: `[copy-failed] ${display} :: ${a.name} -> ${safeName} :: ${errReason(err)}`,
+              message: formatCopyFailed(display, a.name, safeName, err),
             });
           }
         }
