@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  errReason,
   fileUrlToPath,
   formatBytes,
   formatDuration,
   pad2,
   sanitizeFilename,
+  sanitizeRelativePath,
   sha256,
 } from "../src/fsutil.ts";
 
@@ -47,6 +49,55 @@ describe("sanitizeFilename", () => {
   test("does not leave a leading underscore-space when input starts with control + space", () => {
     // Without leading-stripping order care, this becomes "_ foo.png". We want "foo.png".
     expect(sanitizeFilename("\x01 foo.png")).toBe("foo.png");
+  });
+  test("NFC-normalizes decomposed names so SMB shares don't reject them", () => {
+    // "DALL·E" with a decomposed É (E + U+0301 combining acute) — the form
+    // macOS APFS hands back. SMB shares typically expect NFC.
+    const decomposed = "DALL·É";
+    const composed = "DALL·É";
+    expect(decomposed).not.toBe(composed);
+    expect(sanitizeFilename(decomposed)).toBe(composed);
+  });
+});
+
+describe("sanitizeRelativePath", () => {
+  test("sanitizes each path component but preserves separators", () => {
+    expect(sanitizeRelativePath("foo/bar*baz/qux")).toBe("foo/bar_baz/qux");
+  });
+  test("byte-caps each component independently", () => {
+    const long = "a".repeat(300);
+    const result = sanitizeRelativePath(`dir/${long}/leaf.png`);
+    const parts = result.split("/");
+    expect(parts).toHaveLength(3);
+    expect(Buffer.byteLength(parts[1] ?? "", "utf8")).toBe(200);
+    expect(parts[0]).toBe("dir");
+    expect(parts[2]).toBe("leaf.png");
+  });
+  test("drops empty segments from accidental double-slashes", () => {
+    expect(sanitizeRelativePath("foo//bar")).toBe("foo/bar");
+  });
+  test("strips trailing dots/spaces per component", () => {
+    expect(sanitizeRelativePath("foo. /bar")).toBe("foo/bar");
+  });
+  test("NFC-normalizes each segment", () => {
+    const decomposed = "DALL·É";
+    expect(sanitizeRelativePath(`Documents/${decomposed}.png`)).toBe("Documents/DALL·É.png");
+  });
+  test("single-segment path round-trips when already valid", () => {
+    expect(sanitizeRelativePath("simple.txt")).toBe("simple.txt");
+  });
+});
+
+describe("errReason", () => {
+  test("formats ErrnoException with code prefix", () => {
+    const err = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    expect(errReason(err)).toBe("EACCES: permission denied");
+  });
+  test("falls back to message when no code", () => {
+    expect(errReason(new Error("plain"))).toBe("plain");
+  });
+  test("stringifies non-Error values", () => {
+    expect(errReason("oops")).toBe("oops");
   });
 });
 
