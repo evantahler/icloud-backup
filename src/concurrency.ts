@@ -1,4 +1,14 @@
 /**
+ * Yield one tick to the macrotask queue. Use between iterations of CPU-heavy
+ * loops so timers (e.g. cli-progress redraws) and I/O callbacks can fire —
+ * microtask yields like `Promise.resolve()` run before the macrotask queue
+ * and so don't unblock setTimeout-driven work.
+ */
+export function microsleep(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
  * Run `worker(item)` over `items` with at most `concurrency` calls in flight.
  * Workers share a single iterator, so each item runs exactly once. Per-item
  * errors are the worker's responsibility — uncaught throws will reject the
@@ -16,6 +26,7 @@ export async function runPool<T>(
       const next = it.next();
       if (next.done) return;
       await worker(next.value);
+      await microsleep();
     }
   });
   await Promise.all(workers);
