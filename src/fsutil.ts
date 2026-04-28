@@ -46,6 +46,17 @@ export function formatBytes(n: number): string {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
+export function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (totalMin < 60) return sec === 0 ? `${totalMin}m` : `${totalMin}m ${sec}s`;
+  const hr = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  return min === 0 ? `${hr}h` : `${hr}h ${min}m`;
+}
+
 export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }

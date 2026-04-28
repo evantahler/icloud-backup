@@ -1,7 +1,7 @@
 import cliProgress from "cli-progress";
 import pc from "picocolors";
 import { LANE_COLOR, type Service } from "./constants.ts";
-import { formatBytes } from "./fsutil.ts";
+import { formatBytes, formatDuration } from "./fsutil.ts";
 
 export type ProgressEvent =
   | { type: "phase"; label: string }
@@ -16,6 +16,7 @@ interface LaneState {
   totalFiles: number;
   totalBytes: number;
   bytesSoFar: number;
+  completedFiles: number;
 }
 
 export interface TuiHandle {
@@ -48,7 +49,37 @@ export function createTui(services: Service[]): TuiHandle {
       totalBytes: "?",
       filename: pc.dim("(starting)"),
     });
-    lanes.set(service, { service, bar, totalFiles: 0, totalBytes: 0, bytesSoFar: 0 });
+    lanes.set(service, {
+      service,
+      bar,
+      totalFiles: 0,
+      totalBytes: 0,
+      bytesSoFar: 0,
+      completedFiles: 0,
+    });
+  }
+
+  const startedAt = Date.now();
+  const summaryBar = multibar.create(1, 0, { elapsed: "0s", eta: "…" }, { format: summaryFormat });
+
+  function updateSummary(): void {
+    const elapsedMs = Date.now() - startedAt;
+    let maxEtaMs = 0;
+    let unknown = false;
+    let allDone = true;
+    for (const lane of lanes.values()) {
+      if (lane.totalFiles === 0) continue;
+      if (lane.completedFiles >= lane.totalFiles) continue;
+      allDone = false;
+      if (lane.completedFiles === 0 || elapsedMs < 2000) {
+        unknown = true;
+        continue;
+      }
+      const laneEtaMs = (elapsedMs * (lane.totalFiles - lane.completedFiles)) / lane.completedFiles;
+      if (laneEtaMs > maxEtaMs) maxEtaMs = laneEtaMs;
+    }
+    const eta = allDone ? "" : unknown ? "…" : formatDuration(maxEtaMs);
+    summaryBar.update(0, { elapsed: formatDuration(elapsedMs), eta });
   }
 
   const handle: TuiHandle = {
@@ -68,14 +99,17 @@ export function createTui(services: Service[]): TuiHandle {
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",
             filename: pc.dim("(starting)"),
           });
+          updateSummary();
           break;
         case "file":
           lane.bytesSoFar += event.bytesDelta;
+          lane.completedFiles = event.index;
           lane.bar.update(event.index, {
             bytes: formatBytes(lane.bytesSoFar),
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",
             filename: truncate(event.name, 60),
           });
+          updateSummary();
           break;
         case "log":
           multibar.log(
@@ -83,11 +117,13 @@ export function createTui(services: Service[]): TuiHandle {
           );
           break;
         case "done":
+          lane.completedFiles = lane.totalFiles;
           lane.bar.update(lane.totalFiles || 1, {
             bytes: formatBytes(event.bytesTransferred),
             totalBytes: formatBytes(event.bytesTransferred),
             filename: pc.green(`done (${event.filesTransferred} files)`),
           });
+          updateSummary();
           break;
       }
     },
@@ -119,6 +155,15 @@ function laneFormat(
   const counts = `${value}/${total}`.padStart(13);
   const bytes = `${payload.bytes}/${payload.totalBytes}`.padStart(16);
   return `${payload.service} │ ${bar} ${pct.toString().padStart(3)}% │ ${counts} │ ${bytes} │ ${payload.filename}`;
+}
+
+function summaryFormat(
+  _options: cliProgress.Options,
+  _params: cliProgress.Params,
+  payload: Record<string, string>,
+): string {
+  const tail = payload.eta ? ` · ETA ${payload.eta}` : "";
+  return pc.dim(`elapsed ${payload.elapsed}${tail}`);
 }
 
 function truncate(s: string, max: number): string {

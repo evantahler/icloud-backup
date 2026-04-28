@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { fileUrlToPath, formatBytes, pad2, sanitizeFilename, sha256 } from "../src/fsutil.ts";
+import {
+  fileUrlToPath,
+  formatBytes,
+  formatDuration,
+  pad2,
+  sanitizeFilename,
+  sha256,
+} from "../src/fsutil.ts";
 
 describe("sanitizeFilename", () => {
   test("removes invalid chars", () => {
@@ -40,6 +47,30 @@ describe("formatBytes", () => {
     expect(formatBytes(1024)).toBe("1.0 KB");
     expect(formatBytes(1024 * 1024)).toBe("1.0 MB");
     expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
+  });
+});
+
+describe("formatDuration", () => {
+  test("formats sub-minute durations as seconds", () => {
+    expect(formatDuration(0)).toBe("0s");
+    expect(formatDuration(499)).toBe("0s");
+    expect(formatDuration(500)).toBe("1s");
+    expect(formatDuration(30_000)).toBe("30s");
+    expect(formatDuration(59_499)).toBe("59s");
+  });
+  test("formats minutes with optional seconds", () => {
+    expect(formatDuration(60_000)).toBe("1m");
+    expect(formatDuration(78_000)).toBe("1m 18s");
+    expect(formatDuration(5 * 60_000 + 12_000)).toBe("5m 12s");
+    expect(formatDuration(59 * 60_000 + 59_000)).toBe("59m 59s");
+  });
+  test("formats hours with optional minutes", () => {
+    expect(formatDuration(60 * 60_000)).toBe("1h");
+    expect(formatDuration(83 * 60_000)).toBe("1h 23m");
+    expect(formatDuration(2 * 60 * 60_000)).toBe("2h");
+  });
+  test("clamps negatives to 0s", () => {
+    expect(formatDuration(-5000)).toBe("0s");
   });
 });
 
