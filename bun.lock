@@ -9,6 +9,7 @@
         "commander": "^14.0.0",
         "macos-ts": "^0.10.1",
         "picocolors": "^1.1.1",
+        "vcard-creator": "^1.0.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.0.0",
@@ -266,6 +267,8 @@
     "unpipe": ["unpipe@1.0.0", "", {}, "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=="],
 
     "vary": ["vary@1.1.2", "", {}, "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg=="],
+
+    "vcard-creator": ["vcard-creator@1.0.0", "", {}, "sha512-LunDOSct5saY+XhaA/fal/GYphrQXuQB5wa0YDy0C9NUMMwOhOaSriY/LseAPQFlh8EpB6vRX7hVxPdNvTzMbw=="],
 
     "which": ["which@2.0.2", "", { "dependencies": { "isexe": "^2.0.0" }, "bin": { "node-which": "./bin/node-which" } }, "sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA=="],
 

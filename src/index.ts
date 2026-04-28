@@ -5,7 +5,7 @@ import { runCheckUpdate } from "./commands/check-update.ts";
 import { runRebuild } from "./commands/rebuild.ts";
 import { runUpgrade } from "./commands/upgrade.ts";
 import { MANIFEST_SNAPSHOT_FILE, type Service } from "./constants.ts";
-import { type Lane, validateDestination } from "./destination.ts";
+import { type ContactsFormat, type Lane, validateDestination } from "./destination.ts";
 import { explainAccessError, runDoctor } from "./doctor.ts";
 import { acquireLock, LockError } from "./lock.ts";
 import { Manifest } from "./manifest.ts";
@@ -21,6 +21,7 @@ interface TaskCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  contactsFormat?: ContactsFormat;
 }
 
 const TASK_FNS: Record<Service, (cfg: TaskCfg) => AsyncIterable<ProgressEvent>> = {
@@ -97,7 +98,12 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
     lanes.map((lane) =>
       consume(
         lane.service,
-        TASK_FNS[lane.service]({ dest: lane.dest, concurrency, snapshot }),
+        TASK_FNS[lane.service]({
+          dest: lane.dest,
+          concurrency,
+          snapshot,
+          ...(lane.contactsFormat ? { contactsFormat: lane.contactsFormat } : {}),
+        }),
         tui,
       ),
     ),
@@ -106,6 +112,10 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
   release?.();
 
   printSummary(lanes, results, Date.now() - startedAt);
+
+  if (tui.hadWarnings()) {
+    console.log(pc.dim(`warnings logged to ${tui.logFile}`));
+  }
 
   const failed = results.some((r) => r.status === "rejected");
   if (failed) {

@@ -32,7 +32,10 @@ const TRAILING_GARBAGE = /[\s.\x00-\x1f]+$/;
 const MAX_FILENAME_BYTES = 200;
 
 export function sanitizeFilename(name: string, fallback = "untitled"): string {
-  let s = name.replace(ZERO_WIDTH_CHARS, "");
+  // NFC-normalize first: macOS APFS/HFS+ stores names in NFD, and SMB shares
+  // typically expect NFC. Without this, names like "DALL·E" (with a decomposed
+  // É) round-trip through Bun.write to SMB as a byte sequence the share rejects.
+  let s = name.normalize("NFC").replace(ZERO_WIDTH_CHARS, "");
   // Strip leading whitespace/control chars *before* substitution so that
   // "\x01 foo" doesn't get stuck as "_ foo" with a leading underscore-space.
   s = s.replace(LEADING_GARBAGE, "");
@@ -45,6 +48,25 @@ export function sanitizeFilename(name: string, fallback = "untitled"): string {
   s = s.replace(TRAILING_GARBAGE, "");
   if (s.length === 0) return fallback;
   return s;
+}
+
+/** Sanitize each path component of a relative path. Separators are preserved. */
+export function sanitizeRelativePath(rel: string): string {
+  return rel
+    .split("/")
+    .filter((seg) => seg.length > 0)
+    .map((seg) => sanitizeFilename(seg))
+    .join("/");
+}
+
+export function errReason(err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  return e?.code ? `${e.code}: ${e.message}` : ((e?.message as string) ?? String(err));
+}
+
+export function errCode(err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  return e?.code ?? "ERR";
 }
 
 function truncateUtf8(s: string, maxBytes: number): string {

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { type PhotoMeta, Photos } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicCopy, atomicWrite, fileExists } from "../copier.ts";
-import { fileUrlToPath, pad2 } from "../fsutil.ts";
+import { fileUrlToPath, pad2, sanitizeFilename } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 
@@ -36,7 +36,8 @@ export async function* runPhotos({
     const processOne = async (p: PhotoMeta): Promise<void> => {
       const idStr = `${p.id}`;
       let bytesDelta = 0;
-      const displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${p.filename}`;
+      const safeName = sanitizeFilename(p.filename);
+      const displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${safeName}`;
       const id = ++nextId;
       queue.push({ type: "start", name: displayName, id });
 
@@ -81,7 +82,7 @@ export async function* runPhotos({
           root,
           `${p.dateCreated.getFullYear()}`,
           pad2(p.dateCreated.getMonth() + 1),
-          p.filename,
+          safeName,
         );
 
         if (
