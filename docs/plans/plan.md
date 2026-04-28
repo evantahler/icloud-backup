@@ -8,7 +8,7 @@ Four services:
 - **Photos** (originals + JSON metadata sidecars)
 - **Drive** — iCloud Drive Desktop & Documents
 - **Notes** (markdown + attachments)
-- **Contacts** (JSON per contact)
+- **Contacts** (vCard or JSON per contact, vCard default)
 
 Two foundations make this clean:
 1. **`macos-ts`** — your TypeScript library at `~/workspace/macos-ts/`. Direct SQLite reads of Photos / Notes / Contacts. No `osxphotos`, no AppleScript, no network calls. We own the iteration loops, so totals are known up-front.
@@ -23,7 +23,7 @@ Service flags (each takes a destination directory):
   --photos    <path>     back up Photos library originals → <path>/photos/
   --drive     <path>     back up iCloud Drive Desktop & Documents → <path>/drive/
   --notes     <path>     back up Apple Notes as markdown → <path>/notes/
-  --contacts  <path>     back up Apple Contacts as JSON → <path>/contacts/
+  --contacts  <path>     back up Apple Contacts → <path>/contacts/  (--format vcard|json, default vcard)
   --all       <path>     shorthand for all four → <path>/{photos,drive,notes,contacts}/
 
 Other:
@@ -65,7 +65,7 @@ State (manifests, lock, update cache) always lives at **`~/.icloud-backup/`**, r
 │           │ Personal/Recipes/Pizza dough.md                             │
 │                                                                        │
 │ Contacts  │ ████████████████████░  96% │     487/  503 │ 412/ 428 KB  │
-│           │ Jane Doe.json                                               │
+│           │ Jane Doe.vcf                                                │
 └────────────────────────────────────────────────────────────────────────┘
 elapsed 3m 42s · ETA 1m 18s
 ```
@@ -80,7 +80,7 @@ bunx icloud-backup --photos <P> --drive <D> --notes <N> --contacts <C>
    ├──► Photos    ──► macos-ts Photos:   iterate → diff manifest → Bun.write → JSON sidecar  → <P>/photos/
    ├──► Drive     ──► Bun.Glob walk:     brctl download → stat → diff manifest → Bun.write   → <D>/drive/
    ├──► Notes     ──► macos-ts Notes:    iterate → diff manifest → write .md + attachments   → <N>/notes/
-   └──► Contacts  ──► macos-ts Contacts: iterate → diff manifest (sha256) → write .json      → <C>/contacts/
+   └──► Contacts  ──► macos-ts Contacts: iterate → diff manifest (sha256) → write .vcf|.json  → <C>/contacts/
 
 State (always local):
   ~/.icloud-backup/
@@ -202,7 +202,7 @@ Per-lane decision rule:
 | Photos   | `${modifiedAt}|${size}`       | move existing dest → `<dest>/_overwritten/<date>/v<n>/`, copy fresh |
 | Drive    | `${mtime}|${size}`            | move existing dest → `<dest>/_overwritten/<date>/v<n>/`, copy fresh |
 | Notes    | `${modifiedAt}`               | move existing `.md` → `<dest>/_overwritten/<date>/v<n>/`, write fresh |
-| Contacts | `sha256(JSON.stringify(...))` | move existing `.json` → `<dest>/_overwritten/<date>/v<n>/`, write fresh |
+| Contacts | `sha256(JSON.stringify(...))` | move existing `.vcf`/`.json` → `<dest>/_overwritten/<date>/v<n>/`, write fresh (also re-emitted on a `--format` switch since `dest_path` changes) |
 
 Why this works:
 - **Crash mid-run:** writes are atomic (write-to-tmp, fsync, rename). Manifest upsert is the *last* step per file. Crash before upsert → next run sees no entry → re-copies. Idempotent.
@@ -695,8 +695,8 @@ For `bunx icloud-backup --all /Volumes/icloud-backup-evan`:
 ├── contacts/
 │   ├── .manifest.sqlite
 │   ├── .manifest.json
-│   ├── Jane Doe-42.json
-│   └── John Smith-87.json
+│   ├── Jane Doe-42.vcf      # default (--format vcard)
+│   └── John Smith-87.vcf    # (or *.json with --format json)
 └── _overwritten/2026-04-25/v2/...
 ```
 
@@ -779,7 +779,7 @@ User-side:
 - **Live Photos:** the `.mov` companion lives next to the `.HEIC`. The photos task copies any `<basename>.mov` sibling. Edited versions (under `resources/renders/`) are not exported in v1.
 - **iCloud-only photos** are skipped with a `log` warning per file. They still count toward totals. Once "Download Originals" finishes, the next run picks them up.
 - **Notes attachments** copy alongside the markdown into a `<title>-<id>.md.attachments/` sibling directory. The `.md` uses relative links into it so the export is self-contained.
-- **Contacts** dump as one JSON file per contact (sha256-keyed in the manifest since `modifiedAt` isn't reliable). vCard converter is a future addition; JSON is more diff-friendly today.
+- **Contacts** emit vCard 3.0 by default (`.vcf`, universally re-importable into Contacts.app, Google Contacts, Outlook, etc.) or JSON via `--format json` (diff-friendly, scriptable). One file per contact, sha256-keyed in the manifest since Apple's `modifiedAt` on contacts isn't reliable. The hash is over the contact data, not the on-disk format, so switching formats archives the old file under `_overwritten/` and re-emits in the new format on the next run.
 - **2FA / app-specific passwords are not needed** — we read local databases, never talk to Apple's servers.
 - **Destination disappearing mid-run** (sleep, network blip, drive ejected): writes fail; the affected lane logs failure in red; next run resumes cleanly thanks to the manifest.
 - **macos-ts as `file:../macos-ts`** is fine for development but blocks `npm publish` (npm rejects file: deps). Before the first auto-release, switch to a published version of `macos-ts` (or to a Git URL like `github:evantahler/macos-ts#v0.x`). The auto-release workflow's `bun install --frozen-lockfile` step will fail loudly if this is missed.
