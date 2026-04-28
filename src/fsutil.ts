@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { LOG_DIR, MANIFEST_DIR } from "./constants.ts";
 
@@ -27,11 +27,19 @@ const ZERO_WIDTH_CHARS = /​|‌|‍|[︀-️]|﻿/g;
 const LEADING_GARBAGE = /^[\s\x00-\x1f]+/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: trailing dots/spaces/controls are rejected on SMB/exFAT/NTFS
 const TRAILING_GARBAGE = /[\s.\x00-\x1f]+$/;
-// AFP/HFS+ caps each path component at 255 bytes; stay under that with headroom
-// for the `.tmp.<pid>.<ts>` suffix atomicCopy appends.
-const MAX_FILENAME_BYTES = 200;
+// Default per-component byte cap. We target SMB as the lowest-common-denominator
+// destination (see README "Destination compatibility"); APFS/HFS+ NAME_MAX is 255
+// but real-world SMB servers cap much lower (HVTVault: 143). Lanes should probe
+// at runtime via probeMaxFilenameBytes and pass that value in — this constant
+// is the fallback when the probe can't run.
+export const DEFAULT_MAX_FILENAME_BYTES = 200;
 
-export function sanitizeFilename(name: string, fallback = "untitled"): string {
+export function sanitizeFilename(
+  name: string,
+  opts: { maxBytes?: number; fallback?: string } = {},
+): string {
+  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_FILENAME_BYTES;
+  const fallback = opts.fallback ?? "untitled";
   // NFC-normalize first: macOS APFS/HFS+ stores names in NFD, and SMB shares
   // typically expect NFC. Without this, names like "DALL·E" (with a decomposed
   // É) round-trip through Bun.write to SMB as a byte sequence the share rejects.
@@ -43,7 +51,7 @@ export function sanitizeFilename(name: string, fallback = "untitled"): string {
   // Leading dots become a single underscore so notes named ".secret" don't
   // produce hidden files on Unix-like filesystems.
   s = s.replace(/^\.+/, "_");
-  s = truncateUtf8(s, MAX_FILENAME_BYTES);
+  s = truncateUtf8(s, maxBytes);
   // Run *after* truncation in case the byte-cap landed on a trailing dot/space.
   s = s.replace(TRAILING_GARBAGE, "");
   if (s.length === 0) return fallback;
@@ -51,12 +59,69 @@ export function sanitizeFilename(name: string, fallback = "untitled"): string {
 }
 
 /** Sanitize each path component of a relative path. Separators are preserved. */
-export function sanitizeRelativePath(rel: string): string {
+export function sanitizeRelativePath(rel: string, maxBytes = DEFAULT_MAX_FILENAME_BYTES): string {
   return rel
     .split("/")
     .filter((seg) => seg.length > 0)
-    .map((seg) => sanitizeFilename(seg))
+    .map((seg) => sanitizeFilename(seg, { maxBytes }))
     .join("/");
+}
+
+/**
+ * Empirically discover the per-component filename byte limit of `dir` by
+ * binary-searching ASCII probe writes. Returns the largest filename byte
+ * length that succeeds, clamped to [floor, ceiling]. Returns `fallback` if
+ * the probe itself can't run (e.g. dir doesn't exist, read-only, perm
+ * denied) — caller should treat that as "use the default cap".
+ *
+ * Real-world example: macOS smbfs against HVTVault advertises NAME_MAX=255
+ * via pathconf, but actually rejects writes >143 bytes. APFS/HFS+ accept
+ * the full 255. We probe instead of trusting pathconf.
+ */
+export async function probeMaxFilenameBytes(
+  dir: string,
+  opts: { fallback?: number; floor?: number; ceiling?: number } = {},
+): Promise<number> {
+  const fallback = opts.fallback ?? DEFAULT_MAX_FILENAME_BYTES;
+  const floor = opts.floor ?? 32;
+  const ceiling = opts.ceiling ?? 255;
+  const sessionId = randomBytes(4).toString("hex");
+  const probedNames: string[] = [];
+  const tryWrite = async (n: number): Promise<boolean> => {
+    // Hidden + session-scoped so concurrent probes (shouldn't happen, but
+    // cheap insurance) and partial cleanups don't collide.
+    const padLen = n - (1 + sessionId.length + 1);
+    if (padLen < 1) return false;
+    const name = `.${sessionId}-${"a".repeat(padLen)}`;
+    const full = `${dir}/${name}`;
+    try {
+      await writeFile(full, "");
+      probedNames.push(full);
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENAMETOOLONG") return false;
+      // Anything else (ENOENT, EACCES, EROFS, etc.) means we can't probe at
+      // all — bubble up so the caller falls back to the default cap.
+      throw err;
+    }
+  };
+  try {
+    if (!(await tryWrite(floor))) return fallback;
+    if (await tryWrite(ceiling)) return ceiling;
+    let lo = floor;
+    let hi = ceiling;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (await tryWrite(mid)) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  } catch {
+    return fallback;
+  } finally {
+    await Promise.all(probedNames.map((p) => unlink(p).catch(() => {})));
+  }
 }
 
 export function errReason(err: unknown): string {

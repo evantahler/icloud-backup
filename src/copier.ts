@@ -1,7 +1,18 @@
+import { randomBytes } from "node:crypto";
 import { rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { OVERWRITTEN_DIR } from "./constants.ts";
 import { mkdirp, todayIso } from "./fsutil.ts";
+
+// Suffix added by atomicCopy/atomicWrite during the temp-file dance. Kept short
+// so we preserve as much filename-byte budget as possible on strict SMB shares;
+// the run-wide lockfile handles cross-process disambiguation. The byte length
+// is fixed (1 + 12 + 4 = 17) so callers can budget for it when sizing destination
+// names.
+export const TEMP_SUFFIX_BYTES = 17;
+function tempSuffix(): string {
+  return `.${randomBytes(6).toString("hex")}.tmp`;
+}
 
 /** Copy `src` → `dest` atomically. Returns bytes written. */
 export async function atomicCopy(
@@ -10,7 +21,7 @@ export async function atomicCopy(
   onProgress?: (fraction: number) => void,
 ): Promise<number> {
   await mkdirp(dirname(dest));
-  const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  const tmp = `${dest}${tempSuffix()}`;
   let pollHandle: ReturnType<typeof setInterval> | undefined;
   if (onProgress) {
     let total = 0;
@@ -47,7 +58,7 @@ export async function atomicWrite(
   content: string | Uint8Array | ArrayBuffer,
 ): Promise<number> {
   await mkdirp(dirname(dest));
-  const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  const tmp = `${dest}${tempSuffix()}`;
   try {
     const bytes = await Bun.write(tmp, content);
     await rename(tmp, dest);

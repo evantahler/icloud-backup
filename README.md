@@ -84,6 +84,25 @@ Crash-safe: writes are atomic (write-to-tmp, fsync, rename); the manifest upsert
 └── _overwritten/<date>/v<n>/...
 ```
 
+## Destination compatibility
+
+The destination can be any locally-mounted directory: APFS-formatted external SSD, exFAT USB stick, or an SMB share to a NAS. Filenames coming out of iCloud sometimes contain characters or lengths that work on macOS-local filesystems but get rejected on shares — long DALL·E prompt-named PNGs, decomposed-Unicode names, trailing dots, etc.
+
+Rather than supporting each filesystem's quirks separately, **all destination paths are sanitized to fit the strictest commonly-deployed SMB share** (the lowest common denominator). A backup that works to a local disk will also work when the same destination is later moved to a NAS.
+
+| Constraint                          | SMB (worst-case observed)        | APFS / HFS+ |
+|-------------------------------------|----------------------------------|-------------|
+| Filename byte length per component  | **143 bytes** (HVTVault probe)\* | 255 bytes   |
+| Total path length                   | 1024 bytes (PATH_MAX)            | 1024 bytes  |
+| Trailing dot or space in name       | rejected                         | allowed     |
+| Reserved chars (`\ : * ? " < > \|`) | rejected                         | allowed     |
+| Filename encoding                   | NFC (UTF-16 on the wire)         | NFD         |
+| Leading dot                         | allowed but hides on Unix        | allowed     |
+
+\* The 143-byte ceiling is server-specific — some Samba builds cap at 255 UTF-16 chars, others lower. The byte cap is therefore **probed at the start of each lane** by binary-searching test writes against the destination root. The discovered cap is logged at run start (e.g. `destination NAME_MAX=143, sanitizing filenames to 126 bytes`).
+
+Truncated filenames keep their extension when possible and never split a multi-byte UTF-8 codepoint. Decomposed names are NFC-normalized so `DALL·É` round-trips identically on both ends.
+
 ## License
 
 MIT © Evan Tahler
