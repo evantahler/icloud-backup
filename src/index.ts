@@ -104,6 +104,10 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
 
   printSummary(lanes, results, Date.now() - startedAt);
 
+  if (tui.hadWarnings()) {
+    console.log(pc.dim(`warnings logged to ${tui.logFile}`));
+  }
+
   const failed = results.some((r) => r.status === "rejected");
   if (failed) {
     for (const [i, r] of results.entries()) {

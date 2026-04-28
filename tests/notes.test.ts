@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chooseAttachmentName } from "../src/tasks/notes.ts";
+import { chooseAttachmentName, formatCopyFailed } from "../src/tasks/notes.ts";
 
 describe("chooseAttachmentName", () => {
   test("returns sanitized base name when nothing is taken", () => {
@@ -71,5 +71,21 @@ describe("chooseAttachmentName", () => {
       chooseAttachmentName("Hospital Discharge.jpeg", 1005, seen),
     ];
     expect(new Set(names).size).toBe(5);
+  });
+});
+
+describe("formatCopyFailed", () => {
+  // The errno is the only diagnostic field that survives terminal soft-wrap of
+  // long warn lines, so it must land in the bracketed prefix.
+  test("puts errno in the prefix so it survives soft-wrap", () => {
+    const err = Object.assign(new Error("name too long"), { code: "ENAMETOOLONG" });
+    const msg = formatCopyFailed("Folder/Note", "raw.png", "raw.png", err);
+    expect(msg.startsWith("[copy-failed/ENAMETOOLONG]")).toBe(true);
+    expect(msg).toContain("ENAMETOOLONG: name too long");
+  });
+
+  test("falls back to ERR when the thrown value has no code", () => {
+    const msg = formatCopyFailed("Folder/Note", "a.png", "a.png", new Error("boom"));
+    expect(msg.startsWith("[copy-failed/ERR]")).toBe(true);
   });
 });
