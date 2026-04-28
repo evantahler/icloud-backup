@@ -1,6 +1,8 @@
+import { createWriteStream, type WriteStream } from "node:fs";
+import { join } from "node:path";
 import cliProgress from "cli-progress";
 import pc from "picocolors";
-import { LANE_COLOR, type Service } from "./constants.ts";
+import { LANE_COLOR, LOG_DIR, type Service } from "./constants.ts";
 import { formatBytes, formatDuration } from "./fsutil.ts";
 
 export type ProgressEvent =
@@ -23,6 +25,8 @@ export interface TuiHandle {
   onEvent(service: Service, event: ProgressEvent): void;
   log(level: "info" | "warn", message: string): void;
   stop(): void;
+  logFile: string;
+  hadWarnings(): boolean;
 }
 
 export function createTui(services: Service[]): TuiHandle {
@@ -61,6 +65,17 @@ export function createTui(services: Service[]): TuiHandle {
 
   const startedAt = Date.now();
   const summaryBar = multibar.create(1, 0, { elapsed: "0s", eta: "…" }, { format: summaryFormat });
+
+  // Per-run warn log; lazy-opened on first warn so empty runs leave no file.
+  // ISO timestamp with `:` and `.` swapped for `-` to be safe across filesystems.
+  const logFile = join(LOG_DIR, `${new Date().toISOString().replace(/[:.]/g, "-")}.log`);
+  let logStream: WriteStream | null = null;
+  let warnSeen = false;
+  function appendWarn(service: Service | "tui", message: string): void {
+    if (!logStream) logStream = createWriteStream(logFile, { flags: "a" });
+    warnSeen = true;
+    logStream.write(`${new Date().toISOString()} [${service}] ${message}\n`);
+  }
 
   function updateSummary(): void {
     const elapsedMs = Date.now() - startedAt;
@@ -115,6 +130,7 @@ export function createTui(services: Service[]): TuiHandle {
           multibar.log(
             `${event.level === "warn" ? pc.yellow("warn") : pc.dim("info")} ${pc.dim(`[${service}]`)} ${event.message}\n`,
           );
+          if (event.level === "warn") appendWarn(service, event.message);
           break;
         case "done":
           lane.completedFiles = lane.totalFiles;
@@ -129,10 +145,14 @@ export function createTui(services: Service[]): TuiHandle {
     },
     log(level, message) {
       multibar.log(`${level === "warn" ? pc.yellow("warn") : pc.dim("info")} ${message}\n`);
+      if (level === "warn") appendWarn("tui", message);
     },
     stop() {
       multibar.stop();
+      logStream?.end();
     },
+    logFile,
+    hadWarnings: () => warnSeen,
   };
 
   return handle;

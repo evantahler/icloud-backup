@@ -64,6 +64,11 @@ export function errReason(err: unknown): string {
   return e?.code ? `${e.code}: ${e.message}` : ((e?.message as string) ?? String(err));
 }
 
+export function errCode(err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  return e?.code ?? "ERR";
+}
+
 function truncateUtf8(s: string, maxBytes: number): string {
   const buf = new TextEncoder().encode(s);
   if (buf.length <= maxBytes) return s;

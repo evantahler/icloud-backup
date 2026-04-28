@@ -2,21 +2,26 @@ import { join } from "node:path";
 import { type Contact, Contacts } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicWrite, fileExists } from "../copier.ts";
+import { type ContactsFormat, DEFAULT_CONTACTS_FORMAT } from "../destination.ts";
 import { sanitizeFilename, sha256 } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
+import { toVCard } from "../vcard.ts";
 
 export interface ContactsCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  contactsFormat?: ContactsFormat;
 }
 
 export async function* runContacts({
   dest,
   concurrency,
   snapshot = true,
+  contactsFormat = DEFAULT_CONTACTS_FORMAT,
 }: ContactsCfg): AsyncIterable<ProgressEvent> {
+  const ext = contactsFormat === "json" ? "json" : "vcf";
   const root = `${dest}/contacts`;
   const mf = await Manifest.open("contacts");
   const db = new Contacts();
@@ -52,11 +57,12 @@ export async function* runContacts({
         const canonical = stableStringify(details);
         const sourceKey = sha256(canonical);
         const existing = mf.get(idStr);
-        const out = join(root, `${sanitizeFilename(display)}-${c.id}.json`);
+        const out = join(root, `${sanitizeFilename(display)}-${c.id}.${ext}`);
 
         if (
           existing &&
           existing.source_key === sourceKey &&
+          existing.dest_path === out &&
           (await fileExists(existing.dest_path))
         ) {
           return;
@@ -65,8 +71,9 @@ export async function* runContacts({
         const version = (existing?.version ?? 0) + 1;
         if (existing) await archiveOverwrite(existing.dest_path, existing.version, root);
 
-        const pretty = `${JSON.stringify(details, null, 2)}\n`;
-        const bytes = await atomicWrite(out, pretty);
+        const payload =
+          contactsFormat === "json" ? `${JSON.stringify(details, null, 2)}\n` : toVCard(details);
+        const bytes = await atomicWrite(out, payload);
 
         mf.upsert({
           source_id: idStr,

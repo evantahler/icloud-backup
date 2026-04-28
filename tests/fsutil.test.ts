@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  errCode,
   errReason,
   fileUrlToPath,
   formatBytes,
@@ -98,6 +99,17 @@ describe("errReason", () => {
   });
   test("stringifies non-Error values", () => {
     expect(errReason("oops")).toBe("oops");
+  });
+});
+
+describe("errCode", () => {
+  test("returns errno code when present", () => {
+    const err = Object.assign(new Error("nope"), { code: "ENAMETOOLONG" });
+    expect(errCode(err)).toBe("ENAMETOOLONG");
+  });
+  test("returns ERR fallback when no code", () => {
+    expect(errCode(new Error("plain"))).toBe("ERR");
+    expect(errCode("oops")).toBe("ERR");
   });
 });
 

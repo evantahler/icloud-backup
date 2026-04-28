@@ -2,7 +2,12 @@ import { Command, Option } from "commander";
 import pc from "picocolors";
 import pkg from "../package.json" with { type: "json" };
 import { ENV_NO_UPDATE_CHECK, SERVICES, type Service } from "./constants.ts";
-import type { Lane } from "./destination.ts";
+import {
+  CONTACTS_FORMATS,
+  type ContactsFormat,
+  DEFAULT_CONTACTS_FORMAT,
+  type Lane,
+} from "./destination.ts";
 
 export const DEFAULT_CONCURRENCY = 5;
 
@@ -54,12 +59,13 @@ const SERVICE_DESCRIPTIONS: Record<Service, string> = {
   photos: "back up Photos library originals",
   drive: "back up iCloud Drive Desktop & Documents",
   notes: "back up Apple Notes as markdown",
-  contacts: "back up Apple Contacts as JSON",
+  contacts: "back up Apple Contacts as vCard or JSON",
 };
 
 interface BackupOpts {
   manifestSnapshot?: boolean;
   concurrency?: number;
+  format?: ContactsFormat;
 }
 
 function snapshotOption(): Option {
@@ -84,6 +90,12 @@ function concurrencyOption(): Option {
     .default(DEFAULT_CONCURRENCY);
 }
 
+function contactsFormatOption(): Option {
+  return new Option("--format <fmt>", `contacts output format (default ${DEFAULT_CONTACTS_FORMAT})`)
+    .choices([...CONTACTS_FORMATS])
+    .default(DEFAULT_CONTACTS_FORMAT);
+}
+
 function addBackupCommand(
   program: Command,
   service: Service,
@@ -94,15 +106,18 @@ function addBackupCommand(
     .description(SERVICE_DESCRIPTIONS[service])
     .argument("<dest>", "destination directory")
     .addOption(snapshotOption())
-    .addOption(concurrencyOption())
-    .action((dest: string, opts: BackupOpts) => {
-      onIntent({
-        kind: "backup",
-        lanes: [{ service, dest }],
-        snapshot: opts.manifestSnapshot !== false,
-        concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
-      });
+    .addOption(concurrencyOption());
+  if (service === "contacts") cmd.addOption(contactsFormatOption());
+  cmd.action((dest: string, opts: BackupOpts) => {
+    const lane: Lane = { service, dest };
+    if (service === "contacts") lane.contactsFormat = opts.format ?? DEFAULT_CONTACTS_FORMAT;
+    onIntent({
+      kind: "backup",
+      lanes: [lane],
+      snapshot: opts.manifestSnapshot !== false,
+      concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
     });
+  });
   applyTheme(cmd);
 }
 
@@ -113,10 +128,16 @@ function addAllCommand(program: Command, onIntent: (intent: Intent) => void): vo
     .argument("<dest>", "destination directory shared by all four services")
     .addOption(snapshotOption())
     .addOption(concurrencyOption())
+    .addOption(contactsFormatOption())
     .action((dest: string, opts: BackupOpts) => {
+      const format = opts.format ?? DEFAULT_CONTACTS_FORMAT;
       onIntent({
         kind: "backup",
-        lanes: SERVICES.map((service) => ({ service, dest })),
+        lanes: SERVICES.map((service) => {
+          const lane: Lane = { service, dest };
+          if (service === "contacts") lane.contactsFormat = format;
+          return lane;
+        }),
         snapshot: opts.manifestSnapshot !== false,
         concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
       });

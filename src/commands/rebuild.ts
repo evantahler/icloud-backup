@@ -162,12 +162,12 @@ export async function* walkServiceDest(
     case "contacts": {
       const db = new Contacts();
       try {
-        const glob = new Glob("*.json");
+        const glob = new Glob("*.{json,vcf}");
         for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
           if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
           if (isManifestSnapshot(rel)) continue;
           const abs = `${root}/${rel}`;
-          const id = parseTrailingId(rel.replace(/\.json$/, ""));
+          const id = parseTrailingId(rel.replace(/\.(json|vcf)$/, ""));
           if (id === null) continue;
           let canonical: string;
           try {
