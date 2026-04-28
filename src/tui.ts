@@ -10,7 +10,17 @@ export type ProgressEvent =
   | { type: "total"; files: number; bytes?: number }
   | { type: "start"; name: string; id: number }
   | { type: "progress"; id: number; fraction: number }
-  | { type: "file"; name: string; bytesDelta: number; index: number; id: number }
+  | {
+      type: "file";
+      name: string;
+      bytesDelta: number;
+      // Source-side byte cost of this item if it had been copied. Lanes set
+      // this so the TUI can subtract skipped/failed file sizes from the
+      // displayed remaining-bytes total.
+      bytesExpected?: number;
+      index: number;
+      id: number;
+    }
   | { type: "log"; level: "info" | "warn"; message: string }
   | { type: "done"; filesTransferred: number; bytesTransferred: number };
 
@@ -183,6 +193,14 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
           lane.bytesSoFar += event.bytesDelta;
           lane.completedFiles = event.index;
           if (event.bytesDelta > 0) lane.copiedFiles++;
+          if (
+            event.bytesDelta === 0 &&
+            event.bytesExpected !== undefined &&
+            event.bytesExpected > 0 &&
+            lane.totalBytes > 0
+          ) {
+            lane.totalBytes = Math.max(lane.bytesSoFar, lane.totalBytes - event.bytesExpected);
+          }
           lane.bar.update(event.index, {
             bytes: formatBytes(lane.bytesSoFar),
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",

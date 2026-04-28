@@ -132,7 +132,14 @@ export async function* runDrive({
         });
       } finally {
         completed++;
-        queue.push({ type: "file", name: f.rel, bytesDelta, index: completed, id });
+        queue.push({
+          type: "file",
+          name: f.rel,
+          bytesDelta,
+          bytesExpected: f.size,
+          index: completed,
+          id,
+        });
       }
     };
 
