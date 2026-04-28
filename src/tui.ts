@@ -79,7 +79,12 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
   }
 
   const startedAt = Date.now();
-  const summaryBar = multibar.create(1, 0, { elapsed: "0s", eta: "…" }, { format: summaryFormat });
+  const summaryBar = multibar.create(
+    1,
+    0,
+    { elapsed: "0s", eta: "…", speed: "" },
+    { format: summaryFormat },
+  );
 
   // Per-run warn log; lazy-opened on first warn so empty runs leave no file.
   // ISO timestamp with `:` and `.` swapped for `-` to be safe across filesystems.
@@ -97,7 +102,9 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
     let maxEtaMs = 0;
     let unknown = false;
     let allDone = true;
+    let totalBytesSoFar = 0;
     for (const lane of lanes.values()) {
+      totalBytesSoFar += lane.bytesSoFar;
       if (lane.totalFiles === 0) continue;
       if (lane.completedFiles >= lane.totalFiles) continue;
       allDone = false;
@@ -109,7 +116,11 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
       if (laneEtaMs > maxEtaMs) maxEtaMs = laneEtaMs;
     }
     const eta = allDone ? "" : unknown ? "…" : formatDuration(maxEtaMs);
-    summaryBar.update(0, { elapsed: formatDuration(elapsedMs), eta });
+    const speed =
+      elapsedMs >= 2000 && totalBytesSoFar > 0
+        ? formatBytes(totalBytesSoFar / (elapsedMs / 1000))
+        : "";
+    summaryBar.update(0, { elapsed: formatDuration(elapsedMs), eta, speed });
   }
 
   const handle: TuiHandle = {
@@ -231,8 +242,9 @@ function summaryFormat(
   _params: cliProgress.Params,
   payload: Record<string, string>,
 ): string {
-  const tail = payload.eta ? ` · ETA ${payload.eta}` : "";
-  return pc.dim(`elapsed ${payload.elapsed}${tail}`);
+  const etaTail = payload.eta ? ` · ETA ${payload.eta}` : "";
+  const speedTail = payload.speed ? ` · ${payload.speed}/s` : "";
+  return pc.dim(`elapsed ${payload.elapsed}${etaTail}${speedTail}`);
 }
 
 function truncate(s: string, max: number): string {
