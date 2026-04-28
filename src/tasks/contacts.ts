@@ -33,6 +33,7 @@ export async function* runContacts({
 
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
+    let nextId = 0;
     let filesTransferred = 0;
     let bytesTransferred = 0;
 
@@ -40,6 +41,8 @@ export async function* runContacts({
       const idStr = `${c.id}`;
       const display = c.displayName || `${c.firstName} ${c.lastName}`.trim() || `contact-${c.id}`;
       let bytesDelta = 0;
+      const id = ++nextId;
+      queue.push({ type: "start", name: display, id });
 
       try {
         let details: ReturnType<typeof db.getContact>;
@@ -95,7 +98,7 @@ export async function* runContacts({
         });
       } finally {
         completed++;
-        queue.push({ type: "file", name: display, bytesDelta, index: completed });
+        queue.push({ type: "file", name: display, bytesDelta, index: completed, id });
       }
     };
 

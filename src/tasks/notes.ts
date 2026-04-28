@@ -77,6 +77,7 @@ export async function* runNotes({
 
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
+    let nextId = 0;
     let filesTransferred = 0;
     let bytesTransferred = 0;
 
@@ -84,6 +85,8 @@ export async function* runNotes({
       const idStr = `${note.id}`;
       const display = `${note.folderName}/${note.title || "(untitled)"}`;
       let bytesDelta = 0;
+      const id = ++nextId;
+      queue.push({ type: "start", name: display, id });
 
       try {
         if (note.isPasswordProtected) {
@@ -135,12 +138,25 @@ export async function* runNotes({
         const linkMap = new Map<string, string>();
         const attachmentsDirName = basename(attachmentsDir);
         const seenAttachmentNames = new Set<string>();
+        // Pie advances by step per loop iteration (whether copied, skipped, or
+        // failed) so it reaches ~100% when the loop finishes regardless of
+        // outcome. The trailing markdown write is small enough to not need its
+        // own slot — the pie clears on the file event right after.
+        const progressStep = attachments.length > 0 ? 1 / attachments.length : 0;
+        let progressBase = 0;
+        const advanceProgress = (): void => {
+          progressBase = Math.min(1, progressBase + progressStep);
+          queue.push({ type: "progress", id, fraction: progressBase });
+        };
 
         for (const a of attachments) {
           if (!a.url) {
             // Skip rows that are never file-backed by design — warning on them
             // would just produce noise on every run.
-            if (NON_FILE_ATTACHMENT_TYPES.has(a.contentType)) continue;
+            if (NON_FILE_ATTACHMENT_TYPES.has(a.contentType)) {
+              advanceProgress();
+              continue;
+            }
             const detail = db.resolveAttachment(a.identifier || a.name);
             const reason = "error" in detail ? detail.error : "unknown";
             const nameOrId = a.name || `(no name, id=${a.id})`;
@@ -149,6 +165,7 @@ export async function* runNotes({
               level: "warn",
               message: `[unresolved/${reason}] type=${a.contentType} identifier=${a.identifier || "(empty)"} :: ${display} :: ${nameOrId}`,
             });
+            advanceProgress();
             continue;
           }
           // Strip the file:// scheme that macos-ts always returns.
@@ -159,12 +176,19 @@ export async function* runNotes({
               level: "warn",
               message: `[source-missing] ${display} :: ${a.name} :: ${src}`,
             });
+            advanceProgress();
             continue;
           }
           const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames);
           const aOut = join(attachmentsDir, safeName);
           try {
-            attachmentBytes += await atomicCopy(src, aOut);
+            attachmentBytes += await atomicCopy(src, aOut, (frac) => {
+              queue.push({
+                type: "progress",
+                id,
+                fraction: Math.min(1, progressBase + frac * progressStep),
+              });
+            });
             attachmentFiles++;
             if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
           } catch (err) {
@@ -174,6 +198,7 @@ export async function* runNotes({
               message: formatCopyFailed(display, a.name, safeName, err),
             });
           }
+          advanceProgress();
         }
         if (attachments.length === 0 && (await fileExists(attachmentsDir))) {
           await rm(attachmentsDir, { recursive: true, force: true });
@@ -217,7 +242,7 @@ export async function* runNotes({
         });
       } finally {
         completed++;
-        queue.push({ type: "file", name: display, bytesDelta, index: completed });
+        queue.push({ type: "file", name: display, bytesDelta, index: completed, id });
       }
     };
 

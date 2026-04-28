@@ -4,16 +4,38 @@ import { OVERWRITTEN_DIR } from "./constants.ts";
 import { mkdirp, todayIso } from "./fsutil.ts";
 
 /** Copy `src` → `dest` atomically. Returns bytes written. */
-export async function atomicCopy(src: string, dest: string): Promise<number> {
+export async function atomicCopy(
+  src: string,
+  dest: string,
+  onProgress?: (fraction: number) => void,
+): Promise<number> {
   await mkdirp(dirname(dest));
   const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  let pollHandle: ReturnType<typeof setInterval> | undefined;
+  if (onProgress) {
+    let total = 0;
+    try {
+      total = (await stat(src)).size;
+    } catch {}
+    onProgress(0);
+    if (total > 0) {
+      pollHandle = setInterval(() => {
+        stat(tmp)
+          .then((s) => onProgress(Math.min(0.99, s.size / total)))
+          .catch(() => {});
+      }, 200);
+    }
+  }
   try {
     await Bun.write(tmp, Bun.file(src));
     await rename(tmp, dest);
+    if (pollHandle) clearInterval(pollHandle);
+    onProgress?.(1);
     // Bun.write returns 0 on AFP mounts even when the write succeeds; stat the
     // landed file so the byte count is accurate everywhere.
     return (await stat(dest)).size;
   } catch (err) {
+    if (pollHandle) clearInterval(pollHandle);
     await safeUnlink(tmp);
     throw err;
   }
