@@ -56,6 +56,11 @@ describe("chooseAttachmentName", () => {
     expect(chooseAttachmentName("foo.jpeg", 2, seen)).toBe("foo-2-2.jpeg");
   });
 
+  test("strips leading whitespace from raw names so AFP/SMB don't reject them", () => {
+    const seen = new Set<string>();
+    expect(chooseAttachmentName(" weird name.png", 1, seen)).toBe("weird name.png");
+  });
+
   test("produces unique disk paths for repeated identical names (regression for #8)", () => {
     const seen = new Set<string>();
     const names = [

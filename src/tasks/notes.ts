@@ -162,10 +162,12 @@ export async function* runNotes({
             attachmentFiles++;
             if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
           } catch (err) {
+            // Identity left, OS error right: terminals truncate long warn lines
+            // on the right, and the OS error embeds a long destination path.
             queue.push({
               type: "log",
               level: "warn",
-              message: `[copy-failed/${errReason(err)}] ${display} :: ${a.name}`,
+              message: `[copy-failed] ${display} :: ${a.name} -> ${safeName} :: ${errReason(err)}`,
             });
           }
         }

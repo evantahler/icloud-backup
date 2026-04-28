@@ -19,9 +19,34 @@ describe("sanitizeFilename", () => {
   test("strips leading dots", () => {
     expect(sanitizeFilename("...secret")).toBe("_secret");
   });
-  test("truncates to 200 chars", () => {
+  test("truncates to 200 bytes", () => {
     const s = "a".repeat(300);
     expect(sanitizeFilename(s).length).toBe(200);
+    expect(Buffer.byteLength(sanitizeFilename(s), "utf8")).toBe(200);
+  });
+  test("byte-caps multibyte names so emoji-heavy names don't blow the AFP limit", () => {
+    // Each 🦘 is 4 UTF-8 bytes; 100 of them = 400 bytes, way over AFP's 255.
+    const result = sanitizeFilename("🦘".repeat(100));
+    expect(Buffer.byteLength(result, "utf8")).toBeLessThanOrEqual(200);
+    // Truncation must land on a UTF-8 boundary (no replacement chars).
+    expect(result).not.toContain("�");
+  });
+  test("strips leading and trailing whitespace", () => {
+    expect(sanitizeFilename(" \tfoo.png ")).toBe("foo.png");
+  });
+  test("strips trailing dots and spaces (rejected on Windows-family filesystems)", () => {
+    expect(sanitizeFilename("foo.png.")).toBe("foo.png");
+    expect(sanitizeFilename("foo. ")).toBe("foo");
+    expect(sanitizeFilename("foo...")).toBe("foo");
+  });
+  test("strips zero-width and variation-selector chars that .trim() misses", () => {
+    expect(sanitizeFilename("​​foo.png")).toBe("foo.png");
+    expect(sanitizeFilename("﻿foo.png")).toBe("foo.png");
+    expect(sanitizeFilename("️foo.png")).toBe("foo.png");
+  });
+  test("does not leave a leading underscore-space when input starts with control + space", () => {
+    // Without leading-stripping order care, this becomes "_ foo.png". We want "foo.png".
+    expect(sanitizeFilename("\x01 foo.png")).toBe("foo.png");
   });
 });
 
