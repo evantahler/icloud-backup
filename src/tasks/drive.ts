@@ -52,11 +52,14 @@ export async function* runDrive({
 
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
+    let nextId = 0;
     let filesTransferred = 0;
     let bytesTransferred = 0;
 
     const processOne = async (f: WalkedFile): Promise<void> => {
       let bytesDelta = 0;
+      const id = ++nextId;
+      queue.push({ type: "start", name: f.rel, id });
       try {
         const sourceKey = `${f.mtimeMs}|${f.size}`;
         const existing = mf.get(f.rel);
@@ -75,7 +78,9 @@ export async function* runDrive({
 
         let bytes = 0;
         try {
-          bytes = await atomicCopy(f.abs, out);
+          bytes = await atomicCopy(f.abs, out, (fraction) => {
+            queue.push({ type: "progress", id, fraction });
+          });
         } catch (err) {
           queue.push({
             type: "log",
@@ -105,7 +110,7 @@ export async function* runDrive({
         });
       } finally {
         completed++;
-        queue.push({ type: "file", name: f.rel, bytesDelta, index: completed });
+        queue.push({ type: "file", name: f.rel, bytesDelta, index: completed, id });
       }
     };
 

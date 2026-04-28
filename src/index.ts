@@ -88,7 +88,10 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
     }
   }
 
-  const tui = createTui(lanes.map((l) => l.service));
+  const tui = createTui(
+    lanes.map((l) => l.service),
+    concurrency,
+  );
   const startedAt = Date.now();
   const results = await Promise.allSettled(
     lanes.map((lane) =>

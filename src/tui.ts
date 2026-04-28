@@ -6,7 +6,9 @@ import { formatBytes, formatDuration } from "./fsutil.ts";
 export type ProgressEvent =
   | { type: "phase"; label: string }
   | { type: "total"; files: number; bytes?: number }
-  | { type: "file"; name: string; bytesDelta: number; index: number }
+  | { type: "start"; name: string; id: number }
+  | { type: "progress"; id: number; fraction: number }
+  | { type: "file"; name: string; bytesDelta: number; index: number; id: number }
   | { type: "log"; level: "info" | "warn"; message: string }
   | { type: "done"; filesTransferred: number; bytesTransferred: number };
 
@@ -17,6 +19,9 @@ interface LaneState {
   totalBytes: number;
   bytesSoFar: number;
   completedFiles: number;
+  slotBars: cliProgress.SingleBar[];
+  slotIds: Array<number | null>;
+  activeCount: number;
 }
 
 export interface TuiHandle {
@@ -25,7 +30,10 @@ export interface TuiHandle {
   stop(): void;
 }
 
-export function createTui(services: Service[]): TuiHandle {
+const MAX_VISIBLE_SLOTS = 5;
+
+export function createTui(services: Service[], concurrency = 1): TuiHandle {
+  const slotCount = Math.min(Math.max(1, concurrency), MAX_VISIBLE_SLOTS);
   const multibar = new cliProgress.MultiBar(
     {
       format: laneFormat,
@@ -49,6 +57,12 @@ export function createTui(services: Service[]): TuiHandle {
       totalBytes: "?",
       filename: pc.dim("(starting)"),
     });
+    const slotBars: cliProgress.SingleBar[] = [];
+    for (let i = 0; i < slotCount; i++) {
+      slotBars.push(
+        multibar.create(1, 0, { filename: pc.dim("(idle)"), pie: " " }, { format: slotFormat }),
+      );
+    }
     lanes.set(service, {
       service,
       bar,
@@ -56,6 +70,9 @@ export function createTui(services: Service[]): TuiHandle {
       totalBytes: 0,
       bytesSoFar: 0,
       completedFiles: 0,
+      slotBars,
+      slotIds: new Array<number | null>(slotCount).fill(null),
+      activeCount: 0,
     });
   }
 
@@ -101,16 +118,50 @@ export function createTui(services: Service[]): TuiHandle {
           });
           updateSummary();
           break;
-        case "file":
+        case "start": {
+          lane.activeCount++;
+          const idx = lane.slotIds.indexOf(null);
+          const slot = idx >= 0 ? lane.slotBars[idx] : undefined;
+          if (idx >= 0 && slot) {
+            lane.slotIds[idx] = event.id;
+            // Pie stays blank until a progress event fires — files that
+            // dedup-skip never trigger atomicCopy and so never get a pie.
+            slot.update(0, {
+              filename: truncate(event.name, slotMaxWidth()),
+              pie: " ",
+            });
+          }
+          lane.bar.update(undefined as unknown as number, {
+            filename: activeLabel(lane.activeCount, lane.slotBars.length),
+          });
+          break;
+        }
+        case "progress": {
+          const idx = lane.slotIds.indexOf(event.id);
+          const slot = idx >= 0 ? lane.slotBars[idx] : undefined;
+          if (idx >= 0 && slot) {
+            slot.update(0, { pie: pieChar(event.fraction) });
+          }
+          break;
+        }
+        case "file": {
+          const idx = lane.slotIds.indexOf(event.id);
+          const slot = idx >= 0 ? lane.slotBars[idx] : undefined;
+          if (idx >= 0 && slot) {
+            lane.slotIds[idx] = null;
+            slot.update(0, { filename: pc.dim("(idle)"), pie: " " });
+          }
+          lane.activeCount = Math.max(0, lane.activeCount - 1);
           lane.bytesSoFar += event.bytesDelta;
           lane.completedFiles = event.index;
           lane.bar.update(event.index, {
             bytes: formatBytes(lane.bytesSoFar),
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",
-            filename: truncate(event.name, 60),
+            filename: activeLabel(lane.activeCount, lane.slotBars.length),
           });
           updateSummary();
           break;
+        }
         case "log":
           multibar.log(
             `${event.level === "warn" ? pc.yellow("warn") : pc.dim("info")} ${pc.dim(`[${service}]`)} ${event.message}\n`,
@@ -169,4 +220,35 @@ function summaryFormat(
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `…${s.slice(s.length - max + 1)}`;
+}
+
+const SLOT_PREFIX = `${" ".repeat(12)}↳ `;
+const PIE_CHARS = ["○", "◔", "◑", "◕", "●"] as const;
+
+function slotFormat(
+  _options: cliProgress.Options,
+  _params: cliProgress.Params,
+  payload: Record<string, string>,
+): string {
+  const pie = payload.pie ?? " ";
+  return `${SLOT_PREFIX}${pie} ${payload.filename ?? ""}`;
+}
+
+function slotMaxWidth(): number {
+  const cols = process.stdout.columns ?? 100;
+  // SLOT_PREFIX + pie char + space + 1 trailing margin
+  return Math.max(20, cols - SLOT_PREFIX.length - 3);
+}
+
+function pieChar(fraction: number): string {
+  if (!Number.isFinite(fraction)) return PIE_CHARS[0];
+  const clamped = Math.max(0, Math.min(1, fraction));
+  const idx = Math.min(PIE_CHARS.length - 1, Math.round(clamped * (PIE_CHARS.length - 1)));
+  return PIE_CHARS[idx] ?? PIE_CHARS[0];
+}
+
+function activeLabel(active: number, visibleSlots: number): string {
+  if (active === 0) return "";
+  const overflow = active > visibleSlots ? ` (+${active - visibleSlots} hidden)` : "";
+  return pc.dim(`${active} active${overflow}`);
 }

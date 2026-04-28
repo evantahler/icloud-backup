@@ -29,13 +29,16 @@ export async function* runPhotos({
 
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
+    let nextId = 0;
     let filesTransferred = 0;
     let bytesTransferred = 0;
 
     const processOne = async (p: PhotoMeta): Promise<void> => {
       const idStr = `${p.id}`;
       let bytesDelta = 0;
-      let displayName = p.filename;
+      const displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${p.filename}`;
+      const id = ++nextId;
+      queue.push({ type: "start", name: displayName, id });
 
       try {
         let urlInfo: { url: string; locallyAvailable: boolean };
@@ -80,7 +83,6 @@ export async function* runPhotos({
           pad2(p.dateCreated.getMonth() + 1),
           p.filename,
         );
-        displayName = `${p.dateCreated.getFullYear()}/${pad2(p.dateCreated.getMonth() + 1)}/${p.filename}`;
 
         if (
           existing &&
@@ -101,7 +103,9 @@ export async function* runPhotos({
           }
         }
 
-        const bytes = await atomicCopy(src, out);
+        const bytes = await atomicCopy(src, out, (fraction) => {
+          queue.push({ type: "progress", id, fraction });
+        });
         const detailsBytes = await atomicWrite(
           `${out}.json`,
           JSON.stringify(db.getPhoto(p.id), null, 2),
@@ -139,6 +143,7 @@ export async function* runPhotos({
           name: displayName,
           bytesDelta,
           index: completed,
+          id,
         });
       }
     };
