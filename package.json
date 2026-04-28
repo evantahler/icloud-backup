@@ -1,6 +1,6 @@
 {
   "name": "@evantahler/icloud-backup",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Append-only backup of iCloud Photos, Drive, Notes, and Contacts to any local directory.",
   "type": "module",
   "bin": {

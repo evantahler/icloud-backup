@@ -34,10 +34,8 @@ export interface TuiHandle {
   hadWarnings(): boolean;
 }
 
-const MAX_VISIBLE_SLOTS = 5;
-
 export function createTui(services: Service[], concurrency = 1): TuiHandle {
-  const slotCount = Math.min(Math.max(1, concurrency), MAX_VISIBLE_SLOTS);
+  const slotCount = Math.max(1, concurrency);
   const multibar = new cliProgress.MultiBar(
     {
       format: laneFormat,
@@ -147,7 +145,7 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
             });
           }
           lane.bar.update(undefined as unknown as number, {
-            filename: activeLabel(lane.activeCount, lane.slotBars.length),
+            filename: activeLabel(lane.activeCount),
           });
           break;
         }
@@ -172,7 +170,7 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
           lane.bar.update(event.index, {
             bytes: formatBytes(lane.bytesSoFar),
             totalBytes: lane.totalBytes ? formatBytes(lane.totalBytes) : "?",
-            filename: activeLabel(lane.activeCount, lane.slotBars.length),
+            filename: activeLabel(lane.activeCount),
           });
           updateSummary();
           break;
@@ -267,8 +265,7 @@ function pieChar(fraction: number): string {
   return PIE_CHARS[idx] ?? PIE_CHARS[0];
 }
 
-function activeLabel(active: number, visibleSlots: number): string {
+function activeLabel(active: number): string {
   if (active === 0) return "";
-  const overflow = active > visibleSlots ? ` (+${active - visibleSlots} hidden)` : "";
-  return pc.dim(`${active} active${overflow}`);
+  return pc.dim(`${active} active`);
 }
