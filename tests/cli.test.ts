@@ -7,6 +7,11 @@ function parseIntent(argv: string[]): Intent {
     captured = i;
   });
   program.exitOverride();
+  // Subcommands need their own exitOverride so option validation errors
+  // (e.g. --format choices()) throw to the caller instead of process.exit().
+  for (const cmd of program.commands) cmd.exitOverride();
+  program.configureOutput({ writeErr: () => {} });
+  for (const cmd of program.commands) cmd.configureOutput({ writeErr: () => {} });
   program.parse(argv, { from: "user" });
   if (!captured) throw new Error("no intent captured");
   return captured;
@@ -24,12 +29,62 @@ describe("CLI subcommand parsing", () => {
   });
 
   test("each service subcommand produces a single-lane backup", () => {
-    for (const service of ["photos", "drive", "notes", "contacts"] as const) {
+    for (const service of ["photos", "drive", "notes"] as const) {
       const i = parseIntent([service, "/dest"]);
       expect(i.kind).toBe("backup");
       if (i.kind !== "backup") throw new Error("unreachable");
       expect(i.lanes).toEqual([{ service, dest: "/dest" }]);
     }
+    const contactsIntent = parseIntent(["contacts", "/dest"]);
+    expect(contactsIntent.kind).toBe("backup");
+    if (contactsIntent.kind !== "backup") throw new Error("unreachable");
+    expect(contactsIntent.lanes).toEqual([
+      { service: "contacts", dest: "/dest", contactsFormat: "vcard" },
+    ]);
+  });
+
+  test("contacts --format defaults to vcard", () => {
+    const i = parseIntent(["contacts", "/d"]);
+    if (i.kind !== "backup") throw new Error("unreachable");
+    expect(i.lanes[0]?.contactsFormat).toBe("vcard");
+  });
+
+  test("contacts --format json switches the lane to json", () => {
+    const i = parseIntent(["contacts", "/d", "--format", "json"]);
+    if (i.kind !== "backup") throw new Error("unreachable");
+    expect(i.lanes[0]?.contactsFormat).toBe("json");
+  });
+
+  test("contacts --format vcard is accepted explicitly", () => {
+    const i = parseIntent(["contacts", "/d", "--format", "vcard"]);
+    if (i.kind !== "backup") throw new Error("unreachable");
+    expect(i.lanes[0]?.contactsFormat).toBe("vcard");
+  });
+
+  test("contacts --format rejects unknown values", () => {
+    expect(() => parseIntent(["contacts", "/d", "--format", "xml"])).toThrow();
+  });
+
+  test("--format is rejected on non-contacts subcommands", () => {
+    expect(() => parseIntent(["notes", "/d", "--format", "json"])).toThrow();
+    expect(() => parseIntent(["photos", "/d", "--format", "json"])).toThrow();
+  });
+
+  test("all --format json applies only to the contacts lane", () => {
+    const i = parseIntent(["all", "/d", "--format", "json"]);
+    if (i.kind !== "backup") throw new Error("unreachable");
+    const byService = Object.fromEntries(i.lanes.map((l) => [l.service, l]));
+    expect(byService.contacts?.contactsFormat).toBe("json");
+    expect(byService.photos?.contactsFormat).toBeUndefined();
+    expect(byService.drive?.contactsFormat).toBeUndefined();
+    expect(byService.notes?.contactsFormat).toBeUndefined();
+  });
+
+  test("all without --format defaults the contacts lane to vcard", () => {
+    const i = parseIntent(["all", "/d"]);
+    if (i.kind !== "backup") throw new Error("unreachable");
+    const contactsLane = i.lanes.find((l) => l.service === "contacts");
+    expect(contactsLane?.contactsFormat).toBe("vcard");
   });
 
   test("all <dest> expands to four lanes sharing the destination", () => {
