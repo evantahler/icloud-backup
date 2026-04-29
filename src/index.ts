@@ -96,17 +96,19 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
   // transfer pool drags it out and starves the drive lane's "scanning" phase.
   if (lanes.some((l) => l.service === "drive")) {
     process.stdout.write(pc.dim(`Materializing iCloud Drive (${DRIVE_ROOTS.join(", ")})…\n`));
-    const results = await Promise.all(
-      DRIVE_ROOTS.map((folder) => run(["brctl", "download", `${HOME}/${folder}`])),
-    );
-    for (const [i, r] of results.entries()) {
-      if (r.exitCode !== 0) {
-        const folder = DRIVE_ROOTS[i];
-        process.stderr.write(
-          pc.yellow(
-            `! brctl download ${HOME}/${folder} exited ${r.exitCode}: ${r.stderr.trim()}\n`,
-          ),
-        );
+    if (process.env.ICLOUD_BACKUP_FAKE !== "1") {
+      const results = await Promise.all(
+        DRIVE_ROOTS.map((folder) => run(["brctl", "download", `${HOME}/${folder}`])),
+      );
+      for (const [i, r] of results.entries()) {
+        if (r.exitCode !== 0) {
+          const folder = DRIVE_ROOTS[i];
+          process.stderr.write(
+            pc.yellow(
+              `! brctl download ${HOME}/${folder} exited ${r.exitCode}: ${r.stderr.trim()}\n`,
+            ),
+          );
+        }
       }
     }
   }

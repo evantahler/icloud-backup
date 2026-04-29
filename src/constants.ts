@@ -20,6 +20,10 @@ export const OVERWRITTEN_DIR = "_overwritten";
 
 // iCloud Drive
 export const DRIVE_ROOTS = ["Desktop", "Documents"] as const;
+// Source root for the Drive lane's walk. In fake-source mode (used by the
+// VHS capture pipeline; see scripts/capture.ts) this points at a fixture
+// directory; in production it's always $HOME.
+export const DRIVE_SOURCE_ROOT = process.env.ICLOUD_BACKUP_FAKE_DRIVE_ROOT ?? HOME;
 
 // Update checker
 export type InstallMethod = "npm" | "bun" | "binary" | "local-dev";

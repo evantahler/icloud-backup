@@ -1,0 +1,128 @@
+{
+  "notes": [
+    {
+      "id": 201,
+      "title": "Q2 launch checklist",
+      "snippet": "Items left before the v0.7 release",
+      "folderId": 11,
+      "folderName": "Work",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-03-12T09:00:00.000Z",
+      "modifiedAt": "2025-04-22T18:33:14.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Q2 launch checklist\n\n- [ ] Cut release branch\n- [ ] Run end-to-end smoke tests\n- [ ] Update README screenshots\n- [ ] Tag the release\n",
+      "attachments": []
+    },
+    {
+      "id": 202,
+      "title": "Reading list",
+      "snippet": "Books to get to before summer",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2024-11-04T22:18:31.000Z",
+      "modifiedAt": "2025-04-25T07:14:09.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Reading list\n\n- *Designing Data-Intensive Applications* — Kleppmann\n- *Working in Public* — Eghbal\n- *The Mythical Man-Month* — Brooks\n",
+      "attachments": []
+    },
+    {
+      "id": 203,
+      "title": "Trip to Lisbon",
+      "snippet": "Day-by-day plan with photos",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-02-01T11:42:50.000Z",
+      "modifiedAt": "2025-04-21T13:55:02.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Trip to Lisbon\n\nThree days in Alfama, two in Belem, one day-trip to Sintra.\n\n## Day 1\nWalked the riverfront, dinner at Pap'Acorda.\n",
+      "attachments": [
+        {
+          "id": 9001,
+          "identifier": "lisbon-skyline",
+          "name": "lisbon-skyline.jpg",
+          "contentType": "public.jpeg",
+          "sourceFile": "notes/lisbon-skyline.jpg",
+          "sourceBytes": 393216
+        },
+        {
+          "id": 9002,
+          "identifier": "lisbon-tram",
+          "name": "lisbon-tram.jpg",
+          "contentType": "public.jpeg",
+          "sourceFile": "notes/lisbon-tram.jpg",
+          "sourceBytes": 458752
+        }
+      ]
+    },
+    {
+      "id": 204,
+      "title": "1:1 talking points",
+      "snippet": "Items to bring up with manager",
+      "folderId": 11,
+      "folderName": "Work",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-04-14T16:12:00.000Z",
+      "modifiedAt": "2025-04-26T15:40:21.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# 1:1 talking points\n\n- Q3 staffing\n- Refactor of the release pipeline\n- Conference budget for fall\n",
+      "attachments": []
+    },
+    {
+      "id": 205,
+      "title": "Sourdough notes",
+      "snippet": "Hydration ratios that have worked",
+      "folderId": 13,
+      "folderName": "Recipes",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2024-09-08T20:01:14.000Z",
+      "modifiedAt": "2025-04-23T11:09:48.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Sourdough notes\n\n## Base\n- 500g bread flour\n- 350g water (70% hydration)\n- 100g levain\n- 10g salt\n\nBulk ferment 4h at 76F, cold retard overnight.\n",
+      "attachments": [
+        {
+          "id": 9003,
+          "identifier": "sourdough-crumb",
+          "name": "sourdough-crumb.jpg",
+          "contentType": "public.jpeg",
+          "sourceFile": "notes/sourdough-crumb.jpg",
+          "sourceBytes": 327680
+        }
+      ]
+    },
+    {
+      "id": 206,
+      "title": "Garden seedlings",
+      "snippet": "What's started indoors",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-03-21T17:30:00.000Z",
+      "modifiedAt": "2025-04-26T08:22:11.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Garden seedlings\n\n- Tomato (Black Krim, Sun Gold) — started 3/14\n- Pepper (Shishito, Padron) — started 3/20\n- Basil — started 3/28\n",
+      "attachments": []
+    },
+    {
+      "id": 207,
+      "title": "Conference talk outline",
+      "snippet": "Draft for the late-summer talk",
+      "folderId": 11,
+      "folderName": "Work",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-04-05T09:15:00.000Z",
+      "modifiedAt": "2025-04-26T19:48:55.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Conference talk outline\n\n## Hook\nMost CLI tools assume a perfect filesystem.\n\n## Body\n- Filename pitfalls across SMB / APFS / exFAT\n- Why rsync isn't enough\n- The case for byte-cap probing\n\n## Close\nLessons from icloud-backup.\n",
+      "attachments": []
+    }
+  ]
+}

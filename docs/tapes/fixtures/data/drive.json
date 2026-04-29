@@ -1,0 +1,18 @@
+{
+  "files": [
+    { "path": "Desktop/2025-roadmap.md", "bytes": 8192 },
+    { "path": "Desktop/team-offsite-agenda.pdf", "bytes": 1310720 },
+    { "path": "Desktop/budget-q2.numbers", "bytes": 524288 },
+    { "path": "Desktop/screenshots/dashboard-2025-04-21.png", "bytes": 786432 },
+    { "path": "Desktop/screenshots/dashboard-2025-04-22.png", "bytes": 819200 },
+    { "path": "Desktop/screenshots/release-notes-draft.png", "bytes": 458752 },
+    { "path": "Documents/Contracts/2024-vendor-msa.pdf", "bytes": 1572864 },
+    { "path": "Documents/Contracts/2025-renewal-rider.pdf", "bytes": 917504 },
+    { "path": "Documents/Notes/architecture-rfc-draft.md", "bytes": 12288 },
+    { "path": "Documents/Notes/incident-2025-03-14.md", "bytes": 6144 },
+    { "path": "Documents/Photos/scanned-passport.jpg", "bytes": 2097152 },
+    { "path": "Documents/Photos/scanned-tax-2024.jpg", "bytes": 1638400 },
+    { "path": "Documents/talks/icloud-backup-talk.key", "bytes": 3145728 },
+    { "path": "Documents/talks/icloud-backup-talk-notes.md", "bytes": 4096 }
+  ]
+}

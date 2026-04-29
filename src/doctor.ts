@@ -1,9 +1,9 @@
 import { access, constants, lstat, stat } from "node:fs/promises";
-import { Notes } from "macos-ts";
 import pc from "picocolors";
 import { DRIVE_ROOTS, HOME, STATE_DIR } from "./constants.ts";
 import type { Lane } from "./destination.ts";
 import { ensureStateDirs } from "./fsutil.ts";
+import { Notes } from "./macos.ts";
 import { run } from "./spawn.ts";
 
 interface Check {
