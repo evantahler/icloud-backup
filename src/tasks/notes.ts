@@ -286,7 +286,7 @@ export async function* runNotes({
     for await (const ev of queue) yield ev;
     await poolDone;
 
-    if (snapshot) await mf.snapshot("notes", dest);
+    if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

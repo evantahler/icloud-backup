@@ -148,7 +148,7 @@ export async function* runDrive({
     for await (const ev of queue) yield ev;
     await poolDone;
 
-    if (snapshot) await mf.snapshot("drive", dest);
+    if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
     mf.close();

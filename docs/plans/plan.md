@@ -84,12 +84,12 @@ bunx icloud-backup --photos <P> --drive <D> --notes <N> --contacts <C>
 
 State (always local):
   ~/.icloud-backup/
-    ├── manifests/{photos,drive,notes,contacts}.sqlite
+    ├── manifest.sqlite              # unified manifest (one table, lane column)
     ├── icloud-backup.lock
     └── logs/<timestamp>.log
 
 Snapshot at end of each lane (atomic, one write per lane):
-  <dest>/<lane>/.manifest.sqlite     # copy of the local manifest as of run completion
+  <dest>/<lane>/.manifest.sqlite     # filtered copy: rows WHERE lane = <lane>
   <dest>/<lane>/.manifest.json       # human-readable export of entries
 ```
 
@@ -181,19 +181,25 @@ Triggering a release: bump `version` in `package.json`, commit, push to `main`. 
 
 ## Resume & incremental detection (the manifest)
 
-One SQLite manifest per lane at `~/.icloud-backup/manifests/<lane>.sqlite`:
+One unified SQLite manifest at `~/.icloud-backup/manifest.sqlite` with a `lane` column scoping rows per service:
 
 ```sql
 CREATE TABLE entries (
-  source_id     TEXT PRIMARY KEY,   -- photos/notes/contacts: db row id; drive: relative path
+  lane          TEXT NOT NULL,      -- "photos" | "drive" | "notes" | "contacts"
+  source_id     TEXT NOT NULL,      -- photos/notes/contacts: db row id; drive: relative path
   dest_path     TEXT NOT NULL,      -- absolute path within the lane's destination
   source_key    TEXT NOT NULL,      -- mtime|size for drive/photos; modifiedAt for notes; sha256 for contacts
   size_bytes    INTEGER NOT NULL,
   backed_up_at  INTEGER NOT NULL,   -- ms epoch
-  version       INTEGER DEFAULT 1   -- bumped each time we archive a prior copy
+  version       INTEGER NOT NULL DEFAULT 1,  -- bumped each time we archive a prior copy
+  PRIMARY KEY (lane, source_id)
 );
-CREATE INDEX entries_dest ON entries(dest_path);
+CREATE INDEX entries_lane_dest ON entries(lane, dest_path);
+PRAGMA user_version = 1;
+PRAGMA journal_mode = WAL;
 ```
+
+`STATE_DIR` honors `ICLOUD_BACKUP_STATE_DIR` (default `~/.icloud-backup`) so tests and unusual setups can relocate state.
 
 Per-lane decision rule:
 
@@ -214,12 +220,14 @@ We don't sha256 every file (too expensive for a photo library). Stat-based diff 
 
 ### Destination-side manifest snapshots
 
-The authoritative manifest stays at `~/.icloud-backup/manifests/<lane>.sqlite` (local-fast, survives unmounted destinations). At the **end of each lane** we also drop a frozen copy of that manifest next to the data:
+The authoritative manifest stays at `~/.icloud-backup/manifest.sqlite` (local-fast, survives unmounted destinations). At the **end of each lane** we also drop a frozen, lane-filtered copy of that manifest next to the data:
 
 ```
-<dest>/<lane>/.manifest.sqlite     # binary copy of the local manifest
+<dest>/<lane>/.manifest.sqlite     # filtered subset of the unified manifest (rows WHERE lane = <lane>)
 <dest>/<lane>/.manifest.json       # JSON export of entries[]
 ```
+
+The snapshot SQLite mirrors the unified schema (with the `lane` column populated) — we ATTACH a tmp file, `INSERT INTO snap.entries SELECT ... WHERE lane = ?`, then atomic-rename. The JSON export carries `lane` per entry too, so a snapshot is fully self-describing.
 
 Why end-of-run only (not dual-write during the lane):
 - Destinations can be SMB / USB / external SSDs. SQLite on those is slow and prone to lock issues — that's why state is local in the first place.
@@ -238,9 +246,11 @@ What this buys us:
 - **Audit trail.** The `.json` is grep-able next to the data without `sqlite3`.
 
 Startup behavior (lane bootstrap):
-1. If `~/.icloud-backup/manifests/<lane>.sqlite` exists → use it (today's behavior).
-2. Else if `<dest>/<lane>/.manifest.sqlite` exists → copy it into `~/.icloud-backup/manifests/<lane>.sqlite` and proceed (log: *"restored manifest from destination snapshot"*).
+1. If `~/.icloud-backup/manifest.sqlite` already has rows for `<lane>` → use them (steady-state).
+2. Else if `<dest>/<lane>/.manifest.sqlite` exists → ATTACH it and INSERT-SELECT its rows into the unified DB (filtered to this lane), then proceed (log: *"restored manifest from destination snapshot"*). Defensively detects old per-lane snapshot schema (no `lane` column) and tags imported rows.
 3. Else fall back to either an empty manifest (first run) or `--rebuild` if the user passed it.
+
+Upgrade note (from the per-lane-files era): older versions stored one SQLite file per lane at `~/.icloud-backup/manifests/<lane>.sqlite`. The unified-manifest version does not auto-migrate those files — run `--rebuild --all <dest>` once after upgrading to repopulate the unified DB from destination contents. The old `~/.icloud-backup/manifests/` directory is harmless but can be deleted afterward.
 
 Escape hatch: `--no-manifest-snapshot` skips the snapshot write. Off by default; only useful if the destination has a hard reason to reject hidden files (legacy filesystems, pedantic sync tools).
 
@@ -546,54 +556,7 @@ export async function runCheckUpdate(): Promise<boolean> {
 }
 ```
 
-**`src/manifest.ts`** — `bun:sqlite` wrapper:
-```ts
-import { Database } from "bun:sqlite";
-const STATE_DIR = `${process.env.HOME}/.icloud-backup`;
-export class Manifest {
-  private db: Database;
-  constructor(lane: 'photos'|'drive'|'notes'|'contacts') {
-    fs.mkdirSync(`${STATE_DIR}/manifests`, { recursive: true });
-    this.db = new Database(`${STATE_DIR}/manifests/${lane}.sqlite`, { create: true });
-    this.db.run(`CREATE TABLE IF NOT EXISTS entries (
-      source_id TEXT PRIMARY KEY, dest_path TEXT NOT NULL, source_key TEXT NOT NULL,
-      size_bytes INTEGER NOT NULL, backed_up_at INTEGER NOT NULL, version INTEGER DEFAULT 1)`);
-  }
-  get(id: string)  { return this.db.query("SELECT * FROM entries WHERE source_id=?").get(id); }
-  upsert(e: Entry) { this.db.run("INSERT INTO entries (...) VALUES (...) ON CONFLICT(source_id) DO UPDATE SET ...", [...]); }
-  close()          { this.db.close(); }
-
-  // End-of-run snapshot: copy the .sqlite + JSON export into <dest>/<lane>/.
-  async snapshot(lane: string, dest: string): Promise<void> {
-    const laneDir = `${dest}/${lane}`;
-    await mkdirp(laneDir);
-    // 1) Binary copy via Bun.write (atomic: tmp + rename).
-    const sqliteSrc = `${STATE_DIR}/manifests/${lane}.sqlite`;
-    const sqliteDst = `${laneDir}/.manifest.sqlite`;
-    const sqliteTmp = `${sqliteDst}.tmp.${process.pid}.${Date.now()}`;
-    await Bun.write(sqliteTmp, Bun.file(sqliteSrc));
-    await fs.rename(sqliteTmp, sqliteDst);
-    // 2) JSON export with header for humans/grep.
-    const rows = this.db.query("SELECT * FROM entries").all();
-    const json = { lane, generatedAt: new Date().toISOString(), count: rows.length, entries: rows };
-    const jsonDst = `${laneDir}/.manifest.json`;
-    const jsonTmp = `${jsonDst}.tmp.${process.pid}.${Date.now()}`;
-    await Bun.write(jsonTmp, JSON.stringify(json, null, 2));
-    await fs.rename(jsonTmp, jsonDst);
-  }
-
-  // Bootstrap: if local manifest is missing but destination has a snapshot, hydrate from it.
-  static async restoreFromSnapshot(lane: string, dest: string): Promise<boolean> {
-    const localPath = `${STATE_DIR}/manifests/${lane}.sqlite`;
-    if (await Bun.file(localPath).exists()) return false;
-    const snap = `${dest}/${lane}/.manifest.sqlite`;
-    if (!(await Bun.file(snap).exists())) return false;
-    fs.mkdirSync(`${STATE_DIR}/manifests`, { recursive: true });
-    await Bun.write(localPath, Bun.file(snap));
-    return true;
-  }
-}
-```
+**`src/manifest.ts`** — `bun:sqlite` wrapper around the unified DB at `${STATE_DIR}/manifest.sqlite`. Each `Manifest` instance is lane-scoped (every query filters by `WHERE lane = ?`); per-instance Database connections share the file safely under WAL. Snapshot is a filtered export via ATTACH + INSERT-SELECT WHERE lane=?, restore is the reverse with old-schema (no-`lane`-column) detection. See `src/manifest.ts` for the canonical implementation.
 
 **`src/copier.ts`** — atomic copy/write + overwrite archive:
 ```ts
@@ -786,8 +749,8 @@ User-side:
 4. **Resume check:** Ctrl-C mid-run, restart. Already-copied files skip instantly (manifest hit).
 5. **Append-only check (Photos):** delete a test photo from iCloud Photos, wait for sync, re-run. File still on destination = ✓.
 6. **Modification check (Notes):** edit a note, re-run. Previous markdown lands in `<dest>/_overwritten/<today>/v1/`, fresh version replaces it. Manifest version increments.
-7. **Manifest rebuild:** delete `~/.icloud-backup/manifests/drive.sqlite`, run `--rebuild --drive <dest>`, then run `--drive <dest>` again — confirms it skips everything (manifest correctly inferred from destination).
-8. **Manifest snapshot round-trip:** after a successful run, confirm `<dest>/<lane>/.manifest.sqlite` and `.manifest.json` exist and the JSON `count` matches `entries` in the SQLite. Then `rm ~/.icloud-backup/manifests/photos.sqlite` and re-run `--photos <dest>` — the run should log *"restored manifest from destination snapshot"* and skip everything (no re-copy, no `--rebuild` needed).
+7. **Manifest rebuild:** clear the drive lane's rows from `~/.icloud-backup/manifest.sqlite` (e.g. `sqlite3 ~/.icloud-backup/manifest.sqlite "DELETE FROM entries WHERE lane='drive'"`), run `--rebuild --drive <dest>`, then run `--drive <dest>` again — confirms it skips everything (manifest correctly inferred from destination).
+8. **Manifest snapshot round-trip:** after a successful run, confirm `<dest>/<lane>/.manifest.sqlite` and `.manifest.json` exist and the JSON `count` matches `entries` in the SQLite. Then `rm ~/.icloud-backup/manifest.sqlite` and re-run `--photos <dest>` — the run should log *"restored manifest from destination snapshot"* and skip everything (no re-copy, no `--rebuild` needed).
 9. **Snapshot opt-out:** run with `--no-manifest-snapshot`; confirm `.manifest.sqlite`/`.manifest.json` are *not* written/updated.
 10. **Drive scanner ignores snapshots:** drop a fake `.manifest.sqlite` into `<dest>/drive/Desktop/`. Confirm the next Drive run does **not** re-copy the snapshot file back (scanner exclusion working).
 11. **Restore test:** copy a random month's photos folder + a notes folder + the contacts dir back to a scratch location; confirm files open (HEIC, .mov pair, .md renders, JSON parses).
@@ -803,7 +766,7 @@ User-side:
 - **Full Disk Access** is the most common failure mode. Granted per-terminal-app. `--doctor` detects this and points at the right Settings page.
 - **`bun link` for local development**: since `macos-ts` is `file:../macos-ts`, the package isn't yet publishable. `bun link` from `~/workspace/icloud-backup` registers it globally so `bunx icloud-backup` resolves to your local checkout. Switch to a published `macos-ts` and `bun publish` for real distribution.
 - **State always at `~/.icloud-backup/`** regardless of destinations. This keeps SQLite local (fast, no SMB locking issues) and means destinations are pure file dumps — easy to inspect, easy to move, easy to back up further.
-- **Manifest snapshots on destination** (`<dest>/<lane>/.manifest.{sqlite,json}`) are written at the *end* of each successful lane only. They're authoritative-as-of-completion, not live. The local manifest at `~/.icloud-backup/manifests/<lane>.sqlite` is the source of truth during a run. If a lane fails, its snapshot stays at the previous successful state — better stale than corrupt.
+- **Manifest snapshots on destination** (`<dest>/<lane>/.manifest.{sqlite,json}`) are written at the *end* of each successful lane only. They're authoritative-as-of-completion, not live. The unified local manifest at `~/.icloud-backup/manifest.sqlite` is the source of truth during a run. If a lane fails, its snapshot stays at the previous successful state — better stale than corrupt.
 - **Live Photos:** the `.mov` companion lives next to the `.HEIC`. The photos task copies any `<basename>.mov` sibling. Edited versions (under `resources/renders/`) are not exported in v1.
 - **iCloud-only photos** are skipped with a `log` warning per file. They still count toward totals. Once "Download Originals" finishes, the next run picks them up.
 - **Notes attachments** copy alongside the markdown into a `<title>-<id>.md.attachments/` sibling directory. The `.md` uses relative links into it so the export is self-contained.

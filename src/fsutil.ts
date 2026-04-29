@@ -1,14 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { LOG_DIR, MANIFEST_DIR } from "./constants.ts";
+import { LOG_DIR, STATE_DIR } from "./constants.ts";
 
 export async function mkdirp(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
 }
 
 export async function ensureStateDirs(): Promise<void> {
-  await mkdirp(MANIFEST_DIR);
+  await mkdirp(STATE_DIR);
   await mkdirp(LOG_DIR);
 }
 
