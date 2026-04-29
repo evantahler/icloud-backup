@@ -45,7 +45,17 @@ function initSchema(db: Database): void {
   db.exec(`PRAGMA user_version = ${SCHEMA_USER_VERSION}`);
 }
 
+type UpsertParams = [string, string, string, string, number, number, number];
+
 export class Manifest {
+  /**
+   * Auto-flush threshold for buffered upserts. With WAL+`synchronous=NORMAL`,
+   * each commit costs a single fsync; flushing every ~100 rows amortizes that
+   * across a batch without holding the write lock long enough to starve other
+   * lanes sharing the manifest.
+   */
+  static readonly BATCH_FLUSH_THRESHOLD = 100;
+
   private readonly db: Database;
   private readonly lane: Service;
   private readonly getStmt;
@@ -53,6 +63,8 @@ export class Manifest {
   private readonly allStmt;
   private readonly clearStmt;
   private readonly txn;
+  private batching = false;
+  private pending: UpsertParams[] = [];
 
   static async open(lane: Service): Promise<Manifest> {
     await ensureStateDirs();
@@ -135,7 +147,7 @@ export class Manifest {
   }
 
   upsert(e: ManifestEntry): void {
-    this.upsertStmt.run(
+    const params: UpsertParams = [
       this.lane,
       e.source_id,
       e.dest_path,
@@ -143,7 +155,46 @@ export class Manifest {
       e.size_bytes,
       e.backed_up_at,
       e.version,
-    );
+    ];
+    if (this.batching) {
+      this.pending.push(params);
+      if (this.pending.length >= Manifest.BATCH_FLUSH_THRESHOLD) this.drainPending();
+      return;
+    }
+    this.upsertStmt.run(...params);
+  }
+
+  /**
+   * Buffer subsequent `upsert()` calls and commit them in transactions of
+   * ~`BATCH_FLUSH_THRESHOLD` rows. Caller MUST pair this with `flushBatch()`
+   * (typically in a `finally`) so a thrown error still commits everything
+   * that completed before the throw.
+   *
+   * Crash semantics: manifest upsert is the last step per file in every lane,
+   * so losing an unflushed batch on `kill -9` means the affected files are
+   * re-copied on the next run — same behavior as today when a crash interrupts
+   * before the upsert call lands.
+   */
+  beginBatch(): void {
+    if (this.batching) this.drainPending();
+    this.batching = true;
+  }
+
+  /**
+   * Commit any buffered upserts and exit batch mode. Idempotent.
+   */
+  flushBatch(): void {
+    this.batching = false;
+    this.drainPending();
+  }
+
+  private drainPending(): void {
+    if (this.pending.length === 0) return;
+    const rows = this.pending;
+    this.pending = [];
+    this.txn(() => {
+      for (const r of rows) this.upsertStmt.run(...r);
+    });
   }
 
   all(): ManifestEntry[] {
@@ -261,6 +312,7 @@ export class Manifest {
   }
 
   close(): void {
+    this.flushBatch();
     this.db.close();
   }
 }

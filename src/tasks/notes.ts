@@ -264,10 +264,15 @@ export async function* runNotes({
       }
     };
 
-    const poolDone = runPool(all, concurrency, processOne).finally(() => queue.close());
+    mf.beginBatch();
+    try {
+      const poolDone = runPool(all, concurrency, processOne).finally(() => queue.close());
 
-    for await (const ev of queue) yield ev;
-    await poolDone;
+      for await (const ev of queue) yield ev;
+      await poolDone;
+    } finally {
+      mf.flushBatch();
+    }
 
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };

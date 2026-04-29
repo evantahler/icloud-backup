@@ -449,6 +449,103 @@ describe("Manifest", () => {
     target.close();
   });
 
+  test("beginBatch + flushBatch: rows commit only on flush", () => {
+    const path = `${tmp}/m.sqlite`;
+    const writer = new Manifest(path);
+    writer.beginBatch();
+    for (let i = 0; i < 10; i++) {
+      writer.upsert({
+        source_id: `id-${i}`,
+        dest_path: `/x/${i}`,
+        source_key: `k-${i}`,
+        size_bytes: i,
+        backed_up_at: i,
+        version: 1,
+      });
+    }
+
+    // A second connection sees the WAL snapshot at last commit — empty so far.
+    const reader = new Manifest(path);
+    expect(reader.all()).toHaveLength(0);
+    reader.close();
+
+    writer.flushBatch();
+
+    const reader2 = new Manifest(path);
+    expect(reader2.all()).toHaveLength(10);
+    reader2.close();
+    writer.close();
+  });
+
+  test("auto-flush fires at BATCH_FLUSH_THRESHOLD", () => {
+    const path = `${tmp}/m.sqlite`;
+    const writer = new Manifest(path);
+    writer.beginBatch();
+    const overshoot = 5;
+    const total = Manifest.BATCH_FLUSH_THRESHOLD + overshoot;
+    for (let i = 0; i < total; i++) {
+      writer.upsert({
+        source_id: `id-${i}`,
+        dest_path: `/x/${i}`,
+        source_key: `k-${i}`,
+        size_bytes: i,
+        backed_up_at: i,
+        version: 1,
+      });
+    }
+
+    // Threshold rows already committed by auto-flush; the trailing `overshoot`
+    // rows are still pending until flushBatch.
+    const reader = new Manifest(path);
+    expect(reader.all()).toHaveLength(Manifest.BATCH_FLUSH_THRESHOLD);
+    reader.close();
+
+    writer.flushBatch();
+
+    const reader2 = new Manifest(path);
+    expect(reader2.all()).toHaveLength(total);
+    reader2.close();
+    writer.close();
+  });
+
+  test("close() flushes pending batched rows", () => {
+    const path = `${tmp}/m.sqlite`;
+    const writer = new Manifest(path);
+    writer.beginBatch();
+    writer.upsert({
+      source_id: "tail",
+      dest_path: "/x/tail",
+      source_key: "k",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    writer.close();
+
+    const reader = new Manifest(path);
+    expect(reader.get("tail")?.size_bytes).toBe(1);
+    reader.close();
+  });
+
+  test("flushBatch outside a batch is a no-op; upsert after flush goes through immediately", () => {
+    const path = `${tmp}/m.sqlite`;
+    const mf = new Manifest(path);
+    mf.flushBatch();
+    mf.upsert({
+      source_id: "post",
+      dest_path: "/x/post",
+      source_key: "k",
+      size_bytes: 7,
+      backed_up_at: 1,
+      version: 1,
+    });
+
+    const reader = new Manifest(path);
+    expect(reader.get("post")?.size_bytes).toBe(7);
+    reader.close();
+    mf.close();
+  });
+
   test("importSnapshotFile is a no-op if the lane already has rows", async () => {
     // Build a snapshot.
     const photosSrc = new Manifest(`${tmp}/source.sqlite`, "photos");
