@@ -31,17 +31,6 @@ export interface NotesCfg {
   snapshot?: boolean;
 }
 
-// Attachment rows whose ZTYPEUTI matches one of these never have a file on
-// disk — content lives in the note body or in ZMERGEABLEDATA1 — so resolving
-// them as files always returns "not-found" and floods the log with noise.
-const NON_FILE_ATTACHMENT_TYPES = new Set([
-  "com.apple.notes.table",
-  "com.apple.notes.gallery",
-  "com.apple.notes.inlinetextattachment.hashtag",
-  "com.apple.notes.inlinetextattachment.mention",
-  "com.apple.notes.inlinetextattachment.link",
-]);
-
 // Errno in the prefix so it survives terminal soft-wrap; the long destination
 // path in e.message stays at the end where wrapping can swallow it harmlessly.
 export function formatCopyFailed(
@@ -186,12 +175,6 @@ export async function* runNotes({
 
         for (const a of attachments) {
           if (!a.url) {
-            // Skip rows that are never file-backed by design — warning on them
-            // would just produce noise on every run.
-            if (NON_FILE_ATTACHMENT_TYPES.has(a.contentType)) {
-              advanceProgress();
-              continue;
-            }
             const detail = db.resolveAttachment(a.identifier || a.name);
             const reason = "error" in detail ? detail.error : "unknown";
             const nameOrId = a.name || `(no name, id=${a.id})`;
