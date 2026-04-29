@@ -222,6 +222,9 @@ export function createTui(services: Service[], concurrency = 1): TuiHandle {
             totalBytes: formatBytes(event.bytesTransferred),
             filename: pc.green(`done (${event.filesTransferred} files)`),
           });
+          for (const slot of lane.slotBars) multibar.remove(slot);
+          lane.slotBars = [];
+          lane.slotIds = [];
           updateSummary();
           break;
       }
