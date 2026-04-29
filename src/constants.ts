@@ -7,8 +7,8 @@ export const SERVICES: readonly Service[] = ["photos", "drive", "notes", "contac
 
 // State paths (always under $HOME, regardless of dest)
 export const HOME = homedir();
-export const STATE_DIR = `${HOME}/.icloud-backup`;
-export const MANIFEST_DIR = `${STATE_DIR}/manifests`;
+export const STATE_DIR = process.env.ICLOUD_BACKUP_STATE_DIR ?? `${HOME}/.icloud-backup`;
+export const MANIFEST_PATH = `${STATE_DIR}/manifest.sqlite`;
 export const LOG_DIR = `${STATE_DIR}/logs`;
 export const LOCK_PATH = `${STATE_DIR}/icloud-backup.lock`;
 export const UPDATE_CACHE_PATH = `${STATE_DIR}/update.json`;

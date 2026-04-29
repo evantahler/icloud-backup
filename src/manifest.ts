@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
-import { copyFile, rename, unlink } from "node:fs/promises";
+import { rename, unlink } from "node:fs/promises";
 import {
-  MANIFEST_DIR,
   MANIFEST_JSON_FILE,
+  MANIFEST_PATH,
   MANIFEST_SNAPSHOT_FILE,
   type Service,
 } from "./constants.ts";
@@ -26,71 +26,98 @@ interface DbRow {
   version: number;
 }
 
+const SCHEMA_USER_VERSION = 1;
+
+function initSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS entries (
+      lane         TEXT NOT NULL,
+      source_id    TEXT NOT NULL,
+      dest_path    TEXT NOT NULL,
+      source_key   TEXT NOT NULL,
+      size_bytes   INTEGER NOT NULL,
+      backed_up_at INTEGER NOT NULL,
+      version      INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (lane, source_id)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS entries_lane_dest ON entries(lane, dest_path)");
+  db.exec(`PRAGMA user_version = ${SCHEMA_USER_VERSION}`);
+}
+
 export class Manifest {
   private readonly db: Database;
+  private readonly lane: Service;
   private readonly getStmt;
   private readonly upsertStmt;
   private readonly allStmt;
+  private readonly clearStmt;
 
   static async open(lane: Service): Promise<Manifest> {
     await ensureStateDirs();
-    return new Manifest(`${MANIFEST_DIR}/${lane}.sqlite`);
+    return new Manifest(MANIFEST_PATH, lane);
   }
 
   /**
-   * If the local manifest at `${MANIFEST_DIR}/${lane}.sqlite` is missing but the destination
-   * has a `.manifest.sqlite` snapshot, copy it into place so the next run resumes from it
-   * (much cheaper than --rebuild). Returns true if a restore happened.
+   * If the unified manifest has no rows for `lane` but the destination has a
+   * `.manifest.sqlite` snapshot, import the snapshot's rows so the next run
+   * resumes from it (much cheaper than --rebuild). Returns true if rows were
+   * imported. Tolerates old per-lane snapshot schema (no `lane` column) by
+   * tagging imported rows with `lane`.
    */
   static async restoreFromSnapshot(lane: Service, dest: string): Promise<boolean> {
-    const localPath = `${MANIFEST_DIR}/${lane}.sqlite`;
-    if (await Bun.file(localPath).exists()) return false;
     const snap = `${dest}/${lane}/${MANIFEST_SNAPSHOT_FILE}`;
     if (!(await Bun.file(snap).exists())) return false;
-    await ensureStateDirs();
-    await copyFile(snap, localPath);
-    return true;
+    const mf = await Manifest.open(lane);
+    try {
+      return mf.importSnapshotFile(snap);
+    } finally {
+      mf.close();
+    }
   }
 
-  constructor(path: string) {
+  /**
+   * Opens a manifest at `path`, scoped to `lane`. WAL mode lets multiple
+   * concurrent lane processes share `MANIFEST_PATH` safely; bun:sqlite calls
+   * serialize within a process via the JS event loop. Defaults to the
+   * "photos" lane purely so existing test code that constructs `new
+   * Manifest(path)` keeps working.
+   */
+  constructor(path: string, lane: Service = "photos") {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS entries (
-        source_id    TEXT PRIMARY KEY,
-        dest_path    TEXT NOT NULL,
-        source_key   TEXT NOT NULL,
-        size_bytes   INTEGER NOT NULL,
-        backed_up_at INTEGER NOT NULL,
-        version      INTEGER NOT NULL DEFAULT 1
-      )
-    `);
-    this.db.exec("CREATE INDEX IF NOT EXISTS entries_dest ON entries(dest_path)");
+    initSchema(this.db);
+    this.lane = lane;
 
-    this.getStmt = this.db.query<DbRow, [string]>(
-      "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries WHERE source_id = ?",
+    this.getStmt = this.db.query<DbRow, [string, string]>(
+      "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries WHERE lane = ? AND source_id = ?",
     );
-    this.upsertStmt = this.db.query<void, [string, string, string, number, number, number]>(`
-      INSERT INTO entries (source_id, dest_path, source_key, size_bytes, backed_up_at, version)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(source_id) DO UPDATE SET
+    this.upsertStmt = this.db.query<
+      void,
+      [string, string, string, string, number, number, number]
+    >(`
+      INSERT INTO entries (lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(lane, source_id) DO UPDATE SET
         dest_path    = excluded.dest_path,
         source_key   = excluded.source_key,
         size_bytes   = excluded.size_bytes,
         backed_up_at = excluded.backed_up_at,
         version      = excluded.version
     `);
-    this.allStmt = this.db.query<DbRow, []>(
-      "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries",
+    this.allStmt = this.db.query<DbRow, [string]>(
+      "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries WHERE lane = ?",
     );
+    this.clearStmt = this.db.query<void, [string]>("DELETE FROM entries WHERE lane = ?");
   }
 
   get(sourceId: string): ManifestEntry | undefined {
-    return this.getStmt.get(sourceId) ?? undefined;
+    return this.getStmt.get(this.lane, sourceId) ?? undefined;
   }
 
   upsert(e: ManifestEntry): void {
     this.upsertStmt.run(
+      this.lane,
       e.source_id,
       e.dest_path,
       e.source_key,
@@ -101,20 +128,61 @@ export class Manifest {
   }
 
   all(): ManifestEntry[] {
-    return this.allStmt.all();
+    return this.allStmt.all(this.lane);
   }
 
   clear(): void {
-    this.db.exec("DELETE FROM entries");
+    this.clearStmt.run(this.lane);
   }
 
   /**
-   * End-of-run snapshot: write a frozen `.manifest.sqlite` (via VACUUM INTO, atomic + WAL-flushed)
-   * and a sibling `.manifest.json` export to `<dest>/<lane>/`. Safe to call while the DB is open;
-   * VACUUM INTO writes a fresh, fully-checkpointed copy of the schema/data.
+   * Import rows from `snap` into this manifest, scoped to this lane. No-op if
+   * this lane already has any rows (caller wanted a clean restore). Detects
+   * old per-lane snapshot schema (no `lane` column) and tags imported rows
+   * with this lane. Returns true if rows were imported.
    */
-  async snapshot(lane: Service, dest: string): Promise<void> {
-    const laneDir = `${dest}/${lane}`;
+  importSnapshotFile(snap: string): boolean {
+    const existingCount = this.db
+      .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM entries WHERE lane = ?")
+      .get(this.lane);
+    if ((existingCount?.n ?? 0) > 0) return false;
+
+    this.db.exec(`ATTACH DATABASE '${snap.replace(/'/g, "''")}' AS snap`);
+    try {
+      const cols = this.db.query<{ name: string }, []>("PRAGMA snap.table_info(entries)").all();
+      const hasLane = cols.some((c) => c.name === "lane");
+      if (hasLane) {
+        this.db
+          .query<void, [string]>(
+            `INSERT OR IGNORE INTO main.entries
+               (lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version)
+             SELECT lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version
+             FROM snap.entries WHERE lane = ?`,
+          )
+          .run(this.lane);
+      } else {
+        this.db
+          .query<void, [string]>(
+            `INSERT OR IGNORE INTO main.entries
+               (lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version)
+             SELECT ?, source_id, dest_path, source_key, size_bytes, backed_up_at, version
+             FROM snap.entries`,
+          )
+          .run(this.lane);
+      }
+    } finally {
+      this.db.exec("DETACH DATABASE snap");
+    }
+    return true;
+  }
+
+  /**
+   * End-of-run snapshot: write a frozen `.manifest.sqlite` (filtered to this
+   * lane's rows) and a sibling `.manifest.json` export to `<dest>/<lane>/`.
+   * The snapshot's schema mirrors the unified DB, including the `lane` column.
+   */
+  async snapshot(dest: string): Promise<void> {
+    const laneDir = `${dest}/${this.lane}`;
     await mkdirp(laneDir);
 
     const sqliteDst = `${laneDir}/${MANIFEST_SNAPSHOT_FILE}`;
@@ -122,7 +190,28 @@ export class Manifest {
     try {
       await unlink(sqliteTmp);
     } catch {}
-    this.db.exec(`VACUUM INTO '${sqliteTmp.replace(/'/g, "''")}'`);
+
+    // Create an empty schema-matching DB at the tmp path. Default rollback
+    // journal mode (no WAL) so the snapshot is a single self-contained file
+    // with no -wal/-shm sidecars next to it.
+    const tmpDb = new Database(sqliteTmp, { create: true });
+    initSchema(tmpDb);
+    tmpDb.close();
+
+    this.db.exec(`ATTACH DATABASE '${sqliteTmp.replace(/'/g, "''")}' AS snap`);
+    try {
+      this.db
+        .query<void, [string]>(
+          `INSERT INTO snap.entries
+             (lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version)
+           SELECT lane, source_id, dest_path, source_key, size_bytes, backed_up_at, version
+           FROM main.entries WHERE lane = ?`,
+        )
+        .run(this.lane);
+    } finally {
+      this.db.exec("DETACH DATABASE snap");
+    }
+
     try {
       await rename(sqliteTmp, sqliteDst);
     } catch (err) {
@@ -132,12 +221,12 @@ export class Manifest {
       throw err;
     }
 
-    const rows = this.allStmt.all();
+    const rows = this.all();
     const json = {
-      lane,
+      lane: this.lane,
       generatedAt: new Date().toISOString(),
       count: rows.length,
-      entries: rows,
+      entries: rows.map((r) => ({ lane: this.lane, ...r })),
     };
     const jsonDst = `${laneDir}/${MANIFEST_JSON_FILE}`;
     const jsonTmp = `${jsonDst}.tmp.${process.pid}.${Date.now()}`;

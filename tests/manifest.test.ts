@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Manifest } from "../src/manifest.ts";
@@ -107,19 +108,64 @@ describe("Manifest", () => {
     mf.close();
   });
 
-  test("clear empties the table", () => {
-    const mf = new Manifest(`${tmp}/m.sqlite`);
-    mf.upsert({
-      source_id: "abc",
-      dest_path: "/x/y",
+  test("clear empties only the current lane", () => {
+    const path = `${tmp}/m.sqlite`;
+    const photos = new Manifest(path, "photos");
+    const notes = new Manifest(path, "notes");
+    photos.upsert({
+      source_id: "p1",
+      dest_path: "/x/p",
       source_key: "k",
       size_bytes: 10,
       backed_up_at: 1,
       version: 1,
     });
-    mf.clear();
-    expect(mf.all()).toEqual([]);
-    mf.close();
+    notes.upsert({
+      source_id: "n1",
+      dest_path: "/x/n",
+      source_key: "k",
+      size_bytes: 20,
+      backed_up_at: 1,
+      version: 1,
+    });
+
+    photos.clear();
+    expect(photos.all()).toEqual([]);
+    expect(notes.get("n1")?.size_bytes).toBe(20);
+    expect(notes.all()).toHaveLength(1);
+
+    photos.close();
+    notes.close();
+  });
+
+  test("get/all are lane-scoped — same source_id in different lanes is independent", () => {
+    const path = `${tmp}/m.sqlite`;
+    const photos = new Manifest(path, "photos");
+    const drive = new Manifest(path, "drive");
+    photos.upsert({
+      source_id: "shared",
+      dest_path: "/photos/x",
+      source_key: "p",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    drive.upsert({
+      source_id: "shared",
+      dest_path: "/drive/x",
+      source_key: "d",
+      size_bytes: 2,
+      backed_up_at: 2,
+      version: 1,
+    });
+
+    expect(photos.get("shared")?.dest_path).toBe("/photos/x");
+    expect(drive.get("shared")?.dest_path).toBe("/drive/x");
+    expect(photos.all()).toHaveLength(1);
+    expect(drive.all()).toHaveLength(1);
+
+    photos.close();
+    drive.close();
   });
 
   test("snapshot writes .manifest.sqlite and .manifest.json with matching entries", async () => {
@@ -141,7 +187,7 @@ describe("Manifest", () => {
       version: 1,
     });
 
-    await mf.snapshot("photos", tmp);
+    await mf.snapshot(tmp);
 
     const sqliteSnap = `${tmp}/photos/.manifest.sqlite`;
     const jsonSnap = `${tmp}/photos/.manifest.json`;
@@ -152,25 +198,34 @@ describe("Manifest", () => {
       lane: string;
       generatedAt: string;
       count: number;
-      entries: Array<{ source_id: string }>;
+      entries: Array<{ source_id: string; lane: string }>;
     };
     expect(json.lane).toBe("photos");
     expect(json.count).toBe(2);
     expect(new Set(json.entries.map((e) => e.source_id))).toEqual(new Set(["abc", "def"]));
+    expect(json.entries.every((e) => e.lane === "photos")).toBe(true);
     expect(typeof json.generatedAt).toBe("string");
 
-    // Open the snapshot DB directly — it should be a valid manifest with same rows.
-    const restored = new Manifest(sqliteSnap);
-    expect(restored.get("abc")?.size_bytes).toBe(10);
-    expect(restored.get("def")?.size_bytes).toBe(20);
-    expect(restored.all().length).toBe(2);
-    restored.close();
+    // The snapshot DB has the new schema with a `lane` column populated.
+    const snapDb = new Database(sqliteSnap, { readonly: true });
+    const cols = snapDb.query<{ name: string }, []>("PRAGMA table_info(entries)").all();
+    expect(cols.some((c) => c.name === "lane")).toBe(true);
+    const rows = snapDb
+      .query<{ source_id: string; lane: string; size_bytes: number }, []>(
+        "SELECT source_id, lane, size_bytes FROM entries ORDER BY source_id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { source_id: "abc", lane: "photos", size_bytes: 10 },
+      { source_id: "def", lane: "photos", size_bytes: 20 },
+    ]);
+    snapDb.close();
 
     mf.close();
   });
 
   test("snapshot is overwritable (re-running replaces the prior snapshot)", async () => {
-    const mf = new Manifest(`${tmp}/m.sqlite`);
+    const mf = new Manifest(`${tmp}/m.sqlite`, "notes");
     mf.upsert({
       source_id: "abc",
       dest_path: "/x/a",
@@ -179,7 +234,7 @@ describe("Manifest", () => {
       backed_up_at: 1,
       version: 1,
     });
-    await mf.snapshot("notes", tmp);
+    await mf.snapshot(tmp);
 
     mf.upsert({
       source_id: "abc",
@@ -197,7 +252,7 @@ describe("Manifest", () => {
       backed_up_at: 3,
       version: 1,
     });
-    await mf.snapshot("notes", tmp);
+    await mf.snapshot(tmp);
 
     const json = (await Bun.file(`${tmp}/notes/.manifest.json`).json()) as {
       count: number;
@@ -212,7 +267,7 @@ describe("Manifest", () => {
   });
 
   test("snapshot leaves no .tmp files behind on success", async () => {
-    const mf = new Manifest(`${tmp}/m.sqlite`);
+    const mf = new Manifest(`${tmp}/m.sqlite`, "drive");
     mf.upsert({
       source_id: "abc",
       dest_path: "/x/a",
@@ -221,7 +276,7 @@ describe("Manifest", () => {
       backed_up_at: 1,
       version: 1,
     });
-    await mf.snapshot("drive", tmp);
+    await mf.snapshot(tmp);
 
     const { readdirSync } = await import("node:fs");
     const files = readdirSync(`${tmp}/drive`);
@@ -230,5 +285,126 @@ describe("Manifest", () => {
     expect(files).toContain(".manifest.json");
 
     mf.close();
+  });
+
+  test("snapshot only contains rows for this lane", async () => {
+    const path = `${tmp}/m.sqlite`;
+    const photos = new Manifest(path, "photos");
+    const notes = new Manifest(path, "notes");
+    photos.upsert({
+      source_id: "p1",
+      dest_path: "/p/1",
+      source_key: "k",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    notes.upsert({
+      source_id: "n1",
+      dest_path: "/n/1",
+      source_key: "k",
+      size_bytes: 2,
+      backed_up_at: 2,
+      version: 1,
+    });
+
+    await photos.snapshot(tmp);
+
+    const snapDb = new Database(`${tmp}/photos/.manifest.sqlite`, { readonly: true });
+    const rows = snapDb
+      .query<{ source_id: string; lane: string }, []>("SELECT source_id, lane FROM entries")
+      .all();
+    expect(rows).toEqual([{ source_id: "p1", lane: "photos" }]);
+    snapDb.close();
+
+    photos.close();
+    notes.close();
+  });
+
+  test("importSnapshotFile imports rows with the new schema", async () => {
+    // Build a snapshot at <tmp>/photos/.manifest.sqlite (new schema).
+    const photosSrc = new Manifest(`${tmp}/source.sqlite`, "photos");
+    photosSrc.upsert({
+      source_id: "x",
+      dest_path: "/x/y",
+      source_key: "k",
+      size_bytes: 10,
+      backed_up_at: 100,
+      version: 1,
+    });
+    await photosSrc.snapshot(tmp);
+    photosSrc.close();
+
+    // Import into a fresh manifest at a different path.
+    const target = new Manifest(`${tmp}/target.sqlite`, "photos");
+    expect(target.importSnapshotFile(`${tmp}/photos/.manifest.sqlite`)).toBe(true);
+    expect(target.get("x")?.size_bytes).toBe(10);
+    expect(target.all()).toHaveLength(1);
+    target.close();
+  });
+
+  test("importSnapshotFile tags old-schema (no lane column) rows with this lane", () => {
+    // Build an old per-lane-format snapshot (no `lane` column) directly.
+    const snapDir = `${tmp}/photos`;
+    mkdirSync(snapDir, { recursive: true });
+    const snapPath = `${snapDir}/.manifest.sqlite`;
+    const oldDb = new Database(snapPath, { create: true });
+    oldDb.exec(`
+      CREATE TABLE entries (
+        source_id    TEXT PRIMARY KEY,
+        dest_path    TEXT NOT NULL,
+        source_key   TEXT NOT NULL,
+        size_bytes   INTEGER NOT NULL,
+        backed_up_at INTEGER NOT NULL,
+        version      INTEGER NOT NULL DEFAULT 1
+      )
+    `);
+    oldDb.run("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?)", [
+      "legacy-id",
+      "/old/path",
+      "k",
+      42,
+      1700000000000,
+      1,
+    ]);
+    oldDb.close();
+
+    const target = new Manifest(`${tmp}/target.sqlite`, "photos");
+    expect(target.importSnapshotFile(snapPath)).toBe(true);
+    const row = target.get("legacy-id");
+    expect(row?.dest_path).toBe("/old/path");
+    expect(row?.size_bytes).toBe(42);
+    expect(target.all()).toHaveLength(1);
+    target.close();
+  });
+
+  test("importSnapshotFile is a no-op if the lane already has rows", async () => {
+    // Build a snapshot.
+    const photosSrc = new Manifest(`${tmp}/source.sqlite`, "photos");
+    photosSrc.upsert({
+      source_id: "from-snap",
+      dest_path: "/p/snap",
+      source_key: "k",
+      size_bytes: 99,
+      backed_up_at: 1,
+      version: 1,
+    });
+    await photosSrc.snapshot(tmp);
+    photosSrc.close();
+
+    // Target already has a row in this lane.
+    const target = new Manifest(`${tmp}/target.sqlite`, "photos");
+    target.upsert({
+      source_id: "existing",
+      dest_path: "/p/existing",
+      source_key: "k",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    expect(target.importSnapshotFile(`${tmp}/photos/.manifest.sqlite`)).toBe(false);
+    expect(target.get("from-snap")).toBeUndefined();
+    expect(target.all()).toHaveLength(1);
+    target.close();
   });
 });

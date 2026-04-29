@@ -15,7 +15,7 @@ Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed three 
 ## Key external dependencies
 
 - **`macos-ts`** is consumed from npm (`^0.9.2`). It owns all the macOS SQLite reads (Photos, Notes, Contacts). Source also lives at `~/workspace/macos-ts/` if you need to fix something upstream — see "Fixing dependencies upstream" below.
-- **`bun:sqlite`** for per-lane manifests at `~/.icloud-backup/manifests/<lane>.sqlite`. Manifests track what's been copied so re-runs are incremental and crash-safe.
+- **`bun:sqlite`** for the unified manifest at `~/.icloud-backup/manifest.sqlite`. One `entries` table with a `lane` column tracks what's been copied across all four services so re-runs are incremental and crash-safe.
 - **`brctl`** (built into macOS) for materializing iCloud Drive files before copying.
 - **No rsync.** All file I/O goes through `Bun.file` / `Bun.write` with atomic write-to-tmp + rename.
 
