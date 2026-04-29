@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { type Contact, Contacts } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import { archiveOverwrite, atomicWrite, fileExists, TEMP_SUFFIX_BYTES } from "../copier.ts";
 import { type ContactsFormat, DEFAULT_CONTACTS_FORMAT } from "../destination.ts";
@@ -10,6 +9,7 @@ import {
   sanitizeFilename,
   sha256,
 } from "../fsutil.ts";
+import { type Contact, Contacts } from "../macos.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 import { toVCard } from "../vcard.ts";

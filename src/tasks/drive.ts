@@ -1,5 +1,5 @@
 import { EventQueue, runPool } from "../concurrency.ts";
-import { DRIVE_ROOTS, HOME } from "../constants.ts";
+import { DRIVE_ROOTS, DRIVE_SOURCE_ROOT } from "../constants.ts";
 import { archiveOverwrite, atomicCopy, fileExists, TEMP_SUFFIX_BYTES } from "../copier.ts";
 import {
   DEFAULT_MAX_FILENAME_BYTES,
@@ -41,7 +41,7 @@ export async function* runDrive({
     yield { type: "phase", label: "scanning" };
     const files: WalkedFile[] = [];
     for (const folder of DRIVE_ROOTS) {
-      for await (const file of walk(`${HOME}/${folder}`, folder)) {
+      for await (const file of walk(`${DRIVE_SOURCE_ROOT}/${folder}`, folder)) {
         files.push(file);
       }
     }

@@ -1,6 +1,5 @@
 import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { type NoteMeta, Notes } from "macos-ts";
 import { EventQueue, runPool } from "../concurrency.ts";
 import {
   archiveOverwrite,
@@ -17,6 +16,7 @@ import {
   probeMaxFilenameBytes,
   sanitizeFilename,
 } from "../fsutil.ts";
+import { type NoteMeta, Notes } from "../macos.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 
