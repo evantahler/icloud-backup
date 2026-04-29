@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { basename } from "node:path";
 import { Glob } from "bun";
 import { Contacts, Notes } from "macos-ts";
 import pc from "picocolors";
@@ -10,41 +11,93 @@ import {
 } from "../constants.ts";
 import type { Lane } from "../destination.ts";
 import { sha256 } from "../fsutil.ts";
-import { Manifest } from "../manifest.ts";
+import { Manifest, type ManifestEntry } from "../manifest.ts";
+import { createTui, type TuiHandle } from "../tui.ts";
 
 export async function runRebuild(lanes: Lane[]): Promise<boolean> {
-  for (const lane of lanes) {
-    console.log(pc.dim(`Rebuilding manifest for ${lane.service}...`));
-    const count = await rebuildLane(lane.service, lane.dest);
-    console.log(pc.green(`  ${lane.service}: ${count} entries`));
+  const tui = createTui(
+    lanes.map((l) => l.service),
+    1,
+  );
+  let ok = true;
+  try {
+    for (const lane of lanes) {
+      const mf = await Manifest.open(lane.service);
+      try {
+        await rebuildLane(lane.service, lane.dest, mf, tui);
+      } catch (err) {
+        ok = false;
+        tui.onEvent(lane.service, {
+          type: "log",
+          level: "warn",
+          message: `failed: ${(err as Error).message}`,
+        });
+        tui.onEvent(lane.service, { type: "done", filesTransferred: 0, bytesTransferred: 0 });
+      } finally {
+        mf.close();
+      }
+    }
+  } finally {
+    tui.stop();
   }
-  return true;
+
+  if (tui.hadWarnings()) {
+    console.log(pc.dim(`warnings logged to ${tui.logFile}`));
+  }
+  return ok;
 }
 
-async function rebuildLane(service: Service, dest: string): Promise<number> {
+export async function rebuildLane(
+  service: Service,
+  dest: string,
+  mf: Manifest,
+  tui: TuiHandle,
+): Promise<number> {
   const root = `${dest}/${service}`;
-  const mf = await Manifest.open(service);
-  mf.clear();
-
-  try {
-    if (!(await isDirectory(root))) {
-      console.log(
-        pc.yellow(
-          `  ${service}: ${root} not found — manifest cleared; next run will re-copy everything`,
-        ),
-      );
-      return 0;
-    }
-
-    let count = 0;
-    for await (const entry of walkServiceDest(service, root)) {
-      mf.upsert(entry);
-      count++;
-    }
-    return count;
-  } finally {
-    mf.close();
+  if (!(await isDirectory(root))) {
+    mf.transaction(() => {
+      mf.clear();
+    });
+    tui.onEvent(service, {
+      type: "log",
+      level: "warn",
+      message: `${root} not found — manifest cleared; next run will re-copy everything`,
+    });
+    tui.onEvent(service, { type: "total", files: 0 });
+    tui.onEvent(service, { type: "done", filesTransferred: 0, bytesTransferred: 0 });
+    return 0;
   }
+
+  tui.onEvent(service, { type: "phase", label: "scanning" });
+  const total = await countServiceFiles(service, root);
+  tui.onEvent(service, { type: "total", files: total });
+
+  const entries: ManifestEntry[] = [];
+  let bytes = 0;
+  for await (const e of walkServiceDest(service, root)) {
+    entries.push(e);
+    bytes += e.size_bytes;
+    tui.onEvent(service, {
+      type: "file",
+      id: 0,
+      index: entries.length,
+      name: basename(e.dest_path),
+      bytesDelta: e.size_bytes,
+    });
+  }
+
+  tui.onEvent(service, { type: "phase", label: "writing manifest" });
+  mf.transaction(() => {
+    mf.clear();
+    for (const e of entries) mf.upsert(e);
+  });
+
+  tui.onEvent(service, {
+    type: "done",
+    filesTransferred: entries.length,
+    bytesTransferred: bytes,
+  });
+  return entries.length;
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -61,17 +114,41 @@ function isManifestSnapshot(rel: string): boolean {
   return base === MANIFEST_SNAPSHOT_FILE || base === MANIFEST_JSON_FILE;
 }
 
+function servicePattern(service: Service): string {
+  switch (service) {
+    case "drive":
+      return "**/*";
+    case "photos":
+      return "**/*.json";
+    case "notes":
+      return "**/*.md";
+    case "contacts":
+      return "*.{json,vcf}";
+  }
+}
+
+/**
+ * Counts files matching a lane's destination pattern. Used to seed the
+ * progress bar before `walkServiceDest` extracts metadata. The count is an
+ * upper bound: the walk may yield fewer entries when sidecars are orphaned,
+ * filenames lack a trailing `-<id>`, or a contact / note can't be resolved.
+ */
+export async function countServiceFiles(service: Service, root: string): Promise<number> {
+  if (!(await isDirectory(root))) return 0;
+  const glob = new Glob(servicePattern(service));
+  let n = 0;
+  for await (const rel of glob.scan({ cwd: root, onlyFiles: true, dot: false })) {
+    if (rel.startsWith(`${OVERWRITTEN_DIR}/`)) continue;
+    if (isManifestSnapshot(rel)) continue;
+    n++;
+  }
+  return n;
+}
+
 export async function* walkServiceDest(
   service: Service,
   root: string,
-): AsyncIterable<{
-  source_id: string;
-  dest_path: string;
-  source_key: string;
-  size_bytes: number;
-  backed_up_at: number;
-  version: number;
-}> {
+): AsyncIterable<ManifestEntry> {
   if (!(await isDirectory(root))) return;
 
   switch (service) {

@@ -52,6 +52,7 @@ export class Manifest {
   private readonly upsertStmt;
   private readonly allStmt;
   private readonly clearStmt;
+  private readonly txn;
 
   static async open(lane: Service): Promise<Manifest> {
     await ensureStateDirs();
@@ -86,6 +87,10 @@ export class Manifest {
   constructor(path: string, lane: Service = "photos") {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    // Safe with WAL: never corrupts the DB, only risks losing the last
+    // committed transaction on power loss. Acceptable because the manifest is
+    // a derived index — `rebuild` can reconstruct it from the destination.
+    this.db.exec("PRAGMA synchronous = NORMAL");
     initSchema(this.db);
     this.lane = lane;
 
@@ -109,6 +114,20 @@ export class Manifest {
       "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries WHERE lane = ?",
     );
     this.clearStmt = this.db.query<void, [string]>("DELETE FROM entries WHERE lane = ?");
+    this.txn = this.db.transaction((fn: () => void) => fn());
+  }
+
+  /**
+   * Run `fn` inside a single SQLite transaction. bun:sqlite emits BEGIN /
+   * COMMIT around the call and rolls back if `fn` throws. `fn` must be
+   * synchronous — buffer any awaited work first, then call this.
+   */
+  transaction<T>(fn: () => T): T {
+    let out!: T;
+    this.txn(() => {
+      out = fn();
+    });
+    return out;
   }
 
   get(sourceId: string): ManifestEntry | undefined {
