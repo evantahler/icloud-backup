@@ -1,6 +1,6 @@
 {
   "name": "@evantahler/icloud-backup",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Append-only backup of iCloud Photos, Drive, Notes, and Contacts to any local directory.",
   "type": "module",
   "bin": {
@@ -40,7 +40,7 @@
   "dependencies": {
     "cli-progress": "^3.12.0",
     "commander": "^14.0.0",
-    "macos-ts": "^0.10.3",
+    "macos-ts": "^0.10.4",
     "picocolors": "^1.1.1",
     "vcard-creator": "^1.0.0"
   },
