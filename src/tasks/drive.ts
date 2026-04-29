@@ -10,7 +10,6 @@ import {
   sanitizeRelativePath,
 } from "../fsutil.ts";
 import { Manifest } from "../manifest.ts";
-import { run } from "../spawn.ts";
 import type { ProgressEvent } from "../tui.ts";
 import { type WalkedFile, walk } from "../walker.ts";
 
@@ -38,19 +37,6 @@ export async function* runDrive({
       level: "info",
       message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
     };
-
-    yield { type: "phase", label: "materializing iCloud Drive" };
-    for (const folder of DRIVE_ROOTS) {
-      const path = `${HOME}/${folder}`;
-      const r = await run(["brctl", "download", path]);
-      if (r.exitCode !== 0) {
-        yield {
-          type: "log",
-          level: "warn",
-          message: `brctl download ${path} exited ${r.exitCode}: ${r.stderr.trim()}`,
-        };
-      }
-    }
 
     yield { type: "phase", label: "scanning" };
     const files: WalkedFile[] = [];
