@@ -4,11 +4,12 @@ import { buildProgram, type Intent } from "./cli.ts";
 import { runCheckUpdate } from "./commands/check-update.ts";
 import { runRebuild } from "./commands/rebuild.ts";
 import { runUpgrade } from "./commands/upgrade.ts";
-import { MANIFEST_SNAPSHOT_FILE, type Service } from "./constants.ts";
+import { DRIVE_ROOTS, HOME, MANIFEST_SNAPSHOT_FILE, type Service } from "./constants.ts";
 import { type ContactsFormat, type Lane, validateDestination } from "./destination.ts";
 import { explainAccessError, runDoctor } from "./doctor.ts";
 import { acquireLock, LockError } from "./lock.ts";
 import { Manifest } from "./manifest.ts";
+import { run } from "./spawn.ts";
 import { runContacts } from "./tasks/contacts.ts";
 import { runDrive } from "./tasks/drive.ts";
 import { runNotes } from "./tasks/notes.ts";
@@ -86,6 +87,27 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
       console.error(
         pc.yellow(`! ${lane.service} snapshot restore failed: ${(err as Error).message}`),
       );
+    }
+  }
+
+  // Hoist `brctl download` out of the drive lane so it runs *before* photos
+  // starts hammering iCloud + SMB. brctl asks `bird` to materialize every
+  // dataless file in Desktop/Documents; running it in parallel with photos'
+  // transfer pool drags it out and starves the drive lane's "scanning" phase.
+  if (lanes.some((l) => l.service === "drive")) {
+    process.stdout.write(pc.dim(`Materializing iCloud Drive (${DRIVE_ROOTS.join(", ")})…\n`));
+    const results = await Promise.all(
+      DRIVE_ROOTS.map((folder) => run(["brctl", "download", `${HOME}/${folder}`])),
+    );
+    for (const [i, r] of results.entries()) {
+      if (r.exitCode !== 0) {
+        const folder = DRIVE_ROOTS[i];
+        process.stderr.write(
+          pc.yellow(
+            `! brctl download ${HOME}/${folder} exited ${r.exitCode}: ${r.stderr.trim()}\n`,
+          ),
+        );
+      }
     }
   }
 
