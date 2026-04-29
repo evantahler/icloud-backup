@@ -10,7 +10,7 @@ This repo is **implemented and shipping**. `docs/plans/plan.md` is the authorita
 
 `@evantahler/icloud-backup` — a Bun CLI that does manually-invoked, append-only backups of iCloud Photos, Drive (Desktop & Documents), Notes, and Contacts to any local directory. macOS-only. No network calls to Apple — reads local SQLite databases via `macos-ts`.
 
-Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed three ways: `bun install -g`, `npm install -g`, and curl'd standalone binaries from GitHub Releases.
+Entry point will be `src/index.ts` with `#!/usr/bin/env bun`. Distributed two ways: curl'd standalone `darwin-arm64` / `darwin-x64` binaries from GitHub Releases (the happy-path installer in the README), and `bun install -g @evantahler/icloud-backup` from npm for contributors who already have Bun. There is no `npm install -g` path — the shebang is `bun`, so installing under Node would leave the binary unrunnable.
 
 ## Key external dependencies
 
