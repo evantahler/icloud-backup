@@ -108,6 +108,77 @@ describe("Manifest", () => {
     mf.close();
   });
 
+  test("transaction commits all upserts atomically", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.transaction(() => {
+      for (let i = 0; i < 25; i++) {
+        mf.upsert({
+          source_id: `id-${i}`,
+          dest_path: `/x/${i}`,
+          source_key: `k-${i}`,
+          size_bytes: i,
+          backed_up_at: i,
+          version: 1,
+        });
+      }
+    });
+    expect(mf.all()).toHaveLength(25);
+    mf.close();
+  });
+
+  test("transaction rolls back on throw — prior rows untouched, inner upserts gone", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "seed",
+      dest_path: "/x/seed",
+      source_key: "k0",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+
+    expect(() =>
+      mf.transaction(() => {
+        mf.upsert({
+          source_id: "in-txn",
+          dest_path: "/x/txn",
+          source_key: "k1",
+          size_bytes: 2,
+          backed_up_at: 2,
+          version: 1,
+        });
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+
+    expect(mf.get("seed")?.size_bytes).toBe(1);
+    expect(mf.get("in-txn")).toBeUndefined();
+    mf.close();
+  });
+
+  test("transaction rolls back a clear() — lane stays populated on throw", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "keep",
+      dest_path: "/x/keep",
+      source_key: "k",
+      size_bytes: 99,
+      backed_up_at: 1,
+      version: 1,
+    });
+
+    expect(() =>
+      mf.transaction(() => {
+        mf.clear();
+        throw new Error("nope");
+      }),
+    ).toThrow("nope");
+
+    expect(mf.get("keep")?.size_bytes).toBe(99);
+    expect(mf.all()).toHaveLength(1);
+    mf.close();
+  });
+
   test("clear empties only the current lane", () => {
     const path = `${tmp}/m.sqlite`;
     const photos = new Manifest(path, "photos");
