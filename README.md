@@ -112,11 +112,7 @@ see [`docs/captures.md`](docs/captures.md) for the VHS + fake-source pipeline.
 If you have [Bun](https://bun.sh) installed and prefer to run from the npm registry instead of the standalone binary:
 
 ```bash
-# Bun
 bun install -g @evantahler/icloud-backup
-
-# npm
-npm install -g @evantahler/icloud-backup
 ```
 
 Or run the latest version without installing:
