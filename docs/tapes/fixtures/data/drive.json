@@ -6,13 +6,27 @@
     { "path": "Desktop/screenshots/dashboard-2025-04-21.png", "bytes": 786432 },
     { "path": "Desktop/screenshots/dashboard-2025-04-22.png", "bytes": 819200 },
     { "path": "Desktop/screenshots/release-notes-draft.png", "bytes": 458752 },
+    { "path": "Desktop/screenshots/onboarding-flow-v3.png", "bytes": 720896 },
+    { "path": "Desktop/screenshots/oauth-error.png", "bytes": 393216 },
+    { "path": "Desktop/notes-from-pascal-1on1.md", "bytes": 5120 },
+    { "path": "Desktop/sketches/pricing-page-v2.sketch", "bytes": 6291456 },
+    { "path": "Desktop/sketches/footer-redesign.sketch", "bytes": 4194304 },
     { "path": "Documents/Contracts/2024-vendor-msa.pdf", "bytes": 1572864 },
     { "path": "Documents/Contracts/2025-renewal-rider.pdf", "bytes": 917504 },
+    { "path": "Documents/Contracts/2025-consulting-sow.pdf", "bytes": 786432 },
     { "path": "Documents/Notes/architecture-rfc-draft.md", "bytes": 12288 },
     { "path": "Documents/Notes/incident-2025-03-14.md", "bytes": 6144 },
+    { "path": "Documents/Notes/postmortem-2025-04-02.md", "bytes": 16384 },
+    { "path": "Documents/Notes/oncall-runbook.md", "bytes": 24576 },
     { "path": "Documents/Photos/scanned-passport.jpg", "bytes": 2097152 },
     { "path": "Documents/Photos/scanned-tax-2024.jpg", "bytes": 1638400 },
+    { "path": "Documents/Photos/insurance-claim-photos.zip", "bytes": 8388608 },
     { "path": "Documents/talks/icloud-backup-talk.key", "bytes": 3145728 },
-    { "path": "Documents/talks/icloud-backup-talk-notes.md", "bytes": 4096 }
+    { "path": "Documents/talks/icloud-backup-talk-notes.md", "bytes": 4096 },
+    { "path": "Documents/talks/lessons-from-2024.key", "bytes": 5242880 },
+    { "path": "Documents/finance/2024-tax-return.pdf", "bytes": 2621440 },
+    { "path": "Documents/finance/q1-2025-statement.pdf", "bytes": 1048576 },
+    { "path": "Documents/recipes/grandma-tagine.md", "bytes": 3072 },
+    { "path": "Documents/recipes/laminated-doughs.md", "bytes": 8192 }
   ]
 }

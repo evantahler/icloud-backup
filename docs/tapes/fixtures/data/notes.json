@@ -123,6 +123,108 @@
       "isPasswordProtected": false,
       "markdown": "# Conference talk outline\n\n## Hook\nMost CLI tools assume a perfect filesystem.\n\n## Body\n- Filename pitfalls across SMB / APFS / exFAT\n- Why rsync isn't enough\n- The case for byte-cap probing\n\n## Close\nLessons from icloud-backup.\n",
       "attachments": []
+    },
+    {
+      "id": 208,
+      "title": "Apartment hunt",
+      "snippet": "Listings shortlist",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-03-28T12:00:00.000Z",
+      "modifiedAt": "2025-04-26T20:33:14.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Apartment hunt\n\n## Shortlist\n- 14th & Folsom — 2BR, $4400, light\n- Dolores & 19th — 1BR, $3200, no parking\n- Hayes & Octavia — studio, $2600, walkable\n",
+      "attachments": [
+        {
+          "id": 9004,
+          "identifier": "apartment-floorplan",
+          "name": "floorplan.pdf",
+          "contentType": "com.adobe.pdf",
+          "sourceFile": "notes/floorplan.pdf",
+          "sourceBytes": 524288
+        }
+      ]
+    },
+    {
+      "id": 209,
+      "title": "Birthday gift ideas",
+      "snippet": "For Mom, due May 15",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-04-12T18:30:00.000Z",
+      "modifiedAt": "2025-04-26T21:14:50.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Birthday gift ideas\n\n- Pottery class series\n- Garden trowel + kneeling pad\n- Cookbook from Camino restaurant\n",
+      "attachments": []
+    },
+    {
+      "id": 210,
+      "title": "Office layout proposal",
+      "snippet": "Sketches for the move",
+      "folderId": 11,
+      "folderName": "Work",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-04-09T15:45:00.000Z",
+      "modifiedAt": "2025-04-27T08:09:02.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Office layout proposal\n\n## Constraints\n- Must seat 18\n- Quiet zone away from kitchen\n- Two phone booths\n",
+      "attachments": [
+        {
+          "id": 9005,
+          "identifier": "office-sketch",
+          "name": "office-sketch.png",
+          "contentType": "public.png",
+          "sourceFile": "notes/office-sketch.png",
+          "sourceBytes": 671744
+        }
+      ]
+    },
+    {
+      "id": 211,
+      "title": "Dim sum spots",
+      "snippet": "Restaurant rec list",
+      "folderId": 13,
+      "folderName": "Recipes",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2024-12-14T13:00:00.000Z",
+      "modifiedAt": "2025-04-27T11:50:11.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Dim sum spots\n\n- Yank Sing — touristy but consistent\n- Hong Kong Lounge II — cart-style, weekend lines\n- Good Mong Kok Bakery — takeout only, cash\n",
+      "attachments": []
+    },
+    {
+      "id": 212,
+      "title": "Conference travel logistics",
+      "snippet": "Flights and hotel for Berlin",
+      "folderId": 11,
+      "folderName": "Work",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-04-18T19:00:00.000Z",
+      "modifiedAt": "2025-04-27T14:22:33.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Conference travel logistics\n\n- Outbound: SFO → BER, Sep 9\n- Hotel: Mitte district, 5 nights\n- Return: BER → SFO, Sep 14\n",
+      "attachments": []
+    },
+    {
+      "id": 213,
+      "title": "Workout split",
+      "snippet": "Current 4-day program",
+      "folderId": 12,
+      "folderName": "Personal",
+      "accountId": 1,
+      "accountName": "iCloud",
+      "createdAt": "2025-01-06T07:30:00.000Z",
+      "modifiedAt": "2025-04-27T16:48:21.000Z",
+      "isPasswordProtected": false,
+      "markdown": "# Workout split\n\n## Mon — Push\nBench, OHP, dips, lateral raise\n\n## Tue — Pull\nDeadlift, row, chinup, curl\n\n## Thu — Legs\nSquat, RDL, lunge, calf\n\n## Sat — Conditioning\nBike or hike, ~45 min\n",
+      "attachments": []
     }
   ]
 }

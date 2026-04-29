@@ -159,8 +159,9 @@ async function runTape(tape: string): Promise<void> {
       ICLOUD_BACKUP_FAKE_DRIVE_ROOT: CAPTURE_FAKE_DRIVE,
       // Synthetic per-item delay applied inside the fake macos-ts classes so
       // the cli-progress bars visibly fill on screen rather than snapping to
-      // 100% instantly. Tuned so a full four-lane run takes ~6s.
-      ICLOUD_BACKUP_FAKE_DELAY_MS: "80",
+      // 100% instantly. Tuned so a full four-lane run takes ~10 s with the
+      // current fixture sizes.
+      ICLOUD_BACKUP_FAKE_DELAY_MS: "120",
       ICLOUD_BACKUP_STATE_DIR: CAPTURE_STATE,
       ICLOUD_BACKUP_NO_UPDATE_CHECK: "1",
     };
