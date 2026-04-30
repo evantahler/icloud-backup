@@ -38,13 +38,13 @@ export async function atomicCopy(
     }
   }
   try {
-    await Bun.write(tmp, Bun.file(src));
+    const written = await Bun.write(tmp, Bun.file(src));
     await rename(tmp, dest);
     if (pollHandle) clearInterval(pollHandle);
     onProgress?.(1);
-    // Bun.write returns 0 on AFP mounts even when the write succeeds; stat the
-    // landed file so the byte count is accurate everywhere.
-    return (await stat(dest)).size;
+    // Bun.write returns 0 on AFP mounts even when the write succeeds; only
+    // pay for the trailing stat in that fallback case.
+    return written > 0 ? written : (await stat(dest)).size;
   } catch (err) {
     if (pollHandle) clearInterval(pollHandle);
     await safeUnlink(tmp);

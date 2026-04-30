@@ -11,7 +11,7 @@ import { acquireLock, LockError } from "./lock.ts";
 import { Manifest } from "./manifest.ts";
 import { run } from "./spawn.ts";
 import { runContacts } from "./tasks/contacts.ts";
-import { runDrive } from "./tasks/drive.ts";
+import { type BrctlOutcome, runDrive } from "./tasks/drive.ts";
 import { runNotes } from "./tasks/notes.ts";
 import { runPhotos } from "./tasks/photos.ts";
 import type { TuiHandle } from "./tui.ts";
@@ -23,6 +23,7 @@ interface TaskCfg {
   concurrency: number;
   snapshot?: boolean;
   contactsFormat?: ContactsFormat;
+  brctlReady?: Promise<BrctlOutcome[]>;
 }
 
 const TASK_FNS: Record<Service, (cfg: TaskCfg) => AsyncIterable<ProgressEvent>> = {
@@ -31,6 +32,22 @@ const TASK_FNS: Record<Service, (cfg: TaskCfg) => AsyncIterable<ProgressEvent>> 
   notes: runNotes,
   contacts: runContacts,
 };
+
+/**
+ * Kick off `brctl download` for each Drive root in parallel. Returns a
+ * promise so the caller can run non-Drive lanes concurrently with
+ * materialization — only the Drive lane needs to wait for `bird` before
+ * scanning. In FAKE mode we resolve immediately.
+ */
+function startBrctl(): Promise<BrctlOutcome[]> {
+  if (process.env.ICLOUD_BACKUP_FAKE === "1") return Promise.resolve([]);
+  return Promise.all(
+    DRIVE_ROOTS.map(async (folder) => {
+      const r = await run(["brctl", "download", `${HOME}/${folder}`]);
+      return { folder, exitCode: r.exitCode, stderr: r.stderr };
+    }),
+  );
+}
 
 async function consume(
   service: Service,
@@ -90,27 +107,14 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
     }
   }
 
-  // Hoist `brctl download` out of the drive lane so it runs *before* photos
-  // starts hammering iCloud + SMB. brctl asks `bird` to materialize every
-  // dataless file in Desktop/Documents; running it in parallel with photos'
-  // transfer pool drags it out and starves the drive lane's "scanning" phase.
+  // Kick off `brctl download` (which asks `bird` to materialize every
+  // dataless file in Desktop/Documents) without awaiting. Only the Drive
+  // lane needs the bytes on disk before it scans — Photos/Notes/Contacts
+  // start immediately and run concurrently with materialization.
+  let brctlReady: Promise<BrctlOutcome[]> | undefined;
   if (lanes.some((l) => l.service === "drive")) {
     process.stdout.write(pc.dim(`Materializing iCloud Drive (${DRIVE_ROOTS.join(", ")})…\n`));
-    if (process.env.ICLOUD_BACKUP_FAKE !== "1") {
-      const results = await Promise.all(
-        DRIVE_ROOTS.map((folder) => run(["brctl", "download", `${HOME}/${folder}`])),
-      );
-      for (const [i, r] of results.entries()) {
-        if (r.exitCode !== 0) {
-          const folder = DRIVE_ROOTS[i];
-          process.stderr.write(
-            pc.yellow(
-              `! brctl download ${HOME}/${folder} exited ${r.exitCode}: ${r.stderr.trim()}\n`,
-            ),
-          );
-        }
-      }
-    }
+    brctlReady = startBrctl();
   }
 
   const tui = createTui(
@@ -127,6 +131,7 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
           concurrency,
           snapshot,
           ...(lane.contactsFormat ? { contactsFormat: lane.contactsFormat } : {}),
+          ...(lane.service === "drive" && brctlReady ? { brctlReady } : {}),
         }),
         tui,
       ),

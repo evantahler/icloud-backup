@@ -42,6 +42,13 @@ export function formatCopyFailed(
   return `[copy-failed/${errCode(err)}] ${display} :: ${srcName} -> ${destName} :: ${errReason(err)}`;
 }
 
+// Cap on parallel attachment copies inside a single note. Notes very
+// occasionally carry dozens of attachments; running them serially makes a
+// single note dominate lane wall-time. Kept small so a high outer
+// `concurrency` (notes-in-flight) doesn't multiply into hundreds of open
+// files on slow destinations.
+const ATTACHMENT_CONCURRENCY = 4;
+
 // Apple Notes auto-names attachments after the note title, so duplicates
 // within a single note are common. Without disambiguation, atomicCopy would
 // silently rename-clobber earlier files at the same path.
@@ -96,6 +103,8 @@ export async function* runNotes({
     const all = db.notes({ sortBy: "modifiedAt", order: "asc" });
     yield { type: "total", files: all.length };
 
+    const existing = mf.allMap();
+
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
     let nextId = 0;
@@ -124,7 +133,7 @@ export async function* runNotes({
         // (e.g. a stale macos-ts) would leave the manifest looking complete.
         const attachments = db.listAttachments(note.id);
         const sourceKey = `${note.modifiedAt.getTime()}|${attachments.length}`;
-        const existing = mf.get(idStr);
+        const prior = existing.get(idStr);
         // Reserve room for `-${note.id}.md` so the final filename also fits.
         const fnameSuffix = `-${note.id}.md`;
         const titleCap = Math.max(8, nameCap - fnameSuffix.length);
@@ -138,20 +147,20 @@ export async function* runNotes({
         const attachmentsDir = `${out}.attachments`;
 
         if (
-          existing &&
-          existing.source_key === sourceKey &&
-          (await fileExists(existing.dest_path)) &&
-          (attachments.length === 0 || (await fileExists(`${existing.dest_path}.attachments`)))
+          prior &&
+          prior.source_key === sourceKey &&
+          (await fileExists(prior.dest_path)) &&
+          (attachments.length === 0 || (await fileExists(`${prior.dest_path}.attachments`)))
         ) {
           return;
         }
 
-        const version = (existing?.version ?? 0) + 1;
-        if (existing) {
-          await archiveOverwrite(existing.dest_path, existing.version, root);
-          const oldAttachments = `${existing.dest_path}.attachments`;
+        const version = (prior?.version ?? 0) + 1;
+        if (prior) {
+          await archiveOverwrite(prior.dest_path, prior.version, root);
+          const oldAttachments = `${prior.dest_path}.attachments`;
           if (await fileExists(oldAttachments)) {
-            await archiveOverwrite(oldAttachments, existing.version, root);
+            await archiveOverwrite(oldAttachments, prior.version, root);
           }
         }
 
@@ -162,8 +171,8 @@ export async function* runNotes({
         const linkMap = new Map<string, string>();
         const attachmentsDirName = basename(attachmentsDir);
         const seenAttachmentNames = new Set<string>();
-        // Pie advances by step per loop iteration (whether copied, skipped, or
-        // failed) so it reaches ~100% when the loop finishes regardless of
+        // Pie advances by step per task completion (whether copied, skipped, or
+        // failed) so it reaches ~100% when all attachments finish regardless of
         // outcome. The trailing markdown write is small enough to not need its
         // own slot — the pie clears on the file event right after.
         const progressStep = attachments.length > 0 ? 1 / attachments.length : 0;
@@ -173,51 +182,71 @@ export async function* runNotes({
           queue.push({ type: "progress", id, fraction: progressBase });
         };
 
-        for (const a of attachments) {
-          if (!a.url) {
-            const detail = db.resolveAttachment(a.identifier || a.name);
-            const reason = "error" in detail ? detail.error : "unknown";
-            const nameOrId = a.name || `(no name, id=${a.id})`;
-            queue.push({
-              type: "log",
-              level: "warn",
-              message: `[unresolved/${reason}] type=${a.contentType} identifier=${a.identifier || "(empty)"} :: ${display} :: ${nameOrId}`,
-            });
-            advanceProgress();
-            continue;
-          }
+        // Resolve each attachment to a copy task with a stable name *before*
+        // running them in parallel — chooseAttachmentName is order-sensitive
+        // (it disambiguates duplicates against `seenAttachmentNames`), so the
+        // dedup pass has to be deterministic and serial.
+        type AttachmentTask =
+          | { kind: "unresolved"; a: (typeof attachments)[number] }
+          | {
+              kind: "copy";
+              a: (typeof attachments)[number];
+              src: string;
+              safeName: string;
+              aOut: string;
+            };
+        const tasks: AttachmentTask[] = attachments.map((a) => {
+          if (!a.url) return { kind: "unresolved", a };
           // Strip the file:// scheme that macos-ts always returns.
           const src = a.url.startsWith("file://") ? a.url.slice("file://".length) : a.url;
-          if (!(await fileExists(src))) {
+          const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames, nameCap);
+          const aOut = join(attachmentsDir, safeName);
+          return { kind: "copy", a, src, safeName, aOut };
+        });
+
+        await runPool(tasks, ATTACHMENT_CONCURRENCY, async (t) => {
+          if (t.kind === "unresolved") {
+            const detail = db.resolveAttachment(t.a.identifier || t.a.name);
+            const reason = "error" in detail ? detail.error : "unknown";
+            const nameOrId = t.a.name || `(no name, id=${t.a.id})`;
             queue.push({
               type: "log",
               level: "warn",
-              message: `[source-missing] ${display} :: ${a.name} :: ${src}`,
+              message: `[unresolved/${reason}] type=${t.a.contentType} identifier=${t.a.identifier || "(empty)"} :: ${display} :: ${nameOrId}`,
             });
             advanceProgress();
-            continue;
+            return;
           }
-          const safeName = chooseAttachmentName(a.name, a.id, seenAttachmentNames, nameCap);
-          const aOut = join(attachmentsDir, safeName);
+          if (!(await fileExists(t.src))) {
+            queue.push({
+              type: "log",
+              level: "warn",
+              message: `[source-missing] ${display} :: ${t.a.name} :: ${t.src}`,
+            });
+            advanceProgress();
+            return;
+          }
           try {
-            attachmentBytes += await atomicCopy(src, aOut, (frac) => {
+            const bytes = await atomicCopy(t.src, t.aOut, (frac) => {
               queue.push({
                 type: "progress",
                 id,
                 fraction: Math.min(1, progressBase + frac * progressStep),
               });
             });
+            attachmentBytes += bytes;
             attachmentFiles++;
-            if (a.identifier) linkMap.set(a.identifier, `./${attachmentsDirName}/${safeName}`);
+            if (t.a.identifier)
+              linkMap.set(t.a.identifier, `./${attachmentsDirName}/${t.safeName}`);
           } catch (err) {
             queue.push({
               type: "log",
               level: "warn",
-              message: formatCopyFailed(display, a.name, safeName, err),
+              message: formatCopyFailed(display, t.a.name, t.safeName, err),
             });
           }
           advanceProgress();
-        }
+        });
         if (attachments.length === 0 && (await fileExists(attachmentsDir))) {
           await rm(attachmentsDir, { recursive: true, force: true });
         }
@@ -240,7 +269,7 @@ export async function* runNotes({
 
         const mdBytes = await atomicWrite(out, content);
 
-        mf.upsert({
+        mf.upsertBuffered({
           source_id: idStr,
           dest_path: out,
           source_key: sourceKey,
@@ -269,6 +298,7 @@ export async function* runNotes({
     for await (const ev of queue) yield ev;
     await poolDone;
 
+    mf.flushPending();
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {

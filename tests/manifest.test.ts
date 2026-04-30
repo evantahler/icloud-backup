@@ -449,6 +449,100 @@ describe("Manifest", () => {
     target.close();
   });
 
+  test("allMap returns lane-scoped entries keyed by source_id", () => {
+    const path = `${tmp}/m.sqlite`;
+    const photos = new Manifest(path, "photos");
+    const notes = new Manifest(path, "notes");
+    photos.upsert({
+      source_id: "p1",
+      dest_path: "/p/1",
+      source_key: "k",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    notes.upsert({
+      source_id: "n1",
+      dest_path: "/n/1",
+      source_key: "k",
+      size_bytes: 2,
+      backed_up_at: 2,
+      version: 1,
+    });
+
+    const map = photos.allMap();
+    expect(map.size).toBe(1);
+    expect(map.get("p1")?.size_bytes).toBe(1);
+    expect(map.has("n1")).toBe(false);
+
+    photos.close();
+    notes.close();
+  });
+
+  test("upsertBuffered + flushPending lands entries", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    for (let i = 0; i < 10; i++) {
+      mf.upsertBuffered({
+        source_id: `id-${i}`,
+        dest_path: `/x/${i}`,
+        source_key: `k-${i}`,
+        size_bytes: i,
+        backed_up_at: i,
+        version: 1,
+      });
+    }
+    // Buffer is below auto-flush threshold; nothing visible yet.
+    expect(mf.all()).toEqual([]);
+    mf.flushPending();
+    expect(mf.all()).toHaveLength(10);
+    mf.close();
+  });
+
+  test("upsertBuffered auto-flushes once the buffer fills", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    // UPSERT_BUFFER_SIZE is 64 internally; push more than that to force a flush.
+    for (let i = 0; i < 70; i++) {
+      mf.upsertBuffered({
+        source_id: `id-${i}`,
+        dest_path: `/x/${i}`,
+        source_key: `k-${i}`,
+        size_bytes: i,
+        backed_up_at: i,
+        version: 1,
+      });
+    }
+    // First 64 should already be flushed; remaining 6 still buffered.
+    expect(mf.all().length).toBeGreaterThanOrEqual(64);
+    mf.flushPending();
+    expect(mf.all()).toHaveLength(70);
+    mf.close();
+  });
+
+  test("flushPending on empty buffer is a no-op", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    expect(() => mf.flushPending()).not.toThrow();
+    expect(() => mf.flushPending()).not.toThrow();
+    mf.close();
+  });
+
+  test("close() flushes any remaining buffered upserts (safety net)", () => {
+    const path = `${tmp}/m.sqlite`;
+    const mf = new Manifest(path);
+    mf.upsertBuffered({
+      source_id: "leak",
+      dest_path: "/x/leak",
+      source_key: "k",
+      size_bytes: 1,
+      backed_up_at: 1,
+      version: 1,
+    });
+    // No explicit flush — close should drain.
+    mf.close();
+    const mf2 = new Manifest(path);
+    expect(mf2.get("leak")?.size_bytes).toBe(1);
+    mf2.close();
+  });
+
   test("importSnapshotFile is a no-op if the lane already has rows", async () => {
     // Build a snapshot.
     const photosSrc = new Manifest(`${tmp}/source.sqlite`, "photos");

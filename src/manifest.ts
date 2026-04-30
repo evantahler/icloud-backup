@@ -45,6 +45,13 @@ function initSchema(db: Database): void {
   db.exec(`PRAGMA user_version = ${SCHEMA_USER_VERSION}`);
 }
 
+// How many buffered upserts to accumulate before auto-flushing inside a
+// single transaction. Bounds the work re-done on a crash mid-run (we re-copy
+// at most this many files, all idempotent because the destination atomic
+// rename has already landed) while collapsing thousands of per-row WAL appends
+// into one BEGIN/COMMIT.
+const UPSERT_BUFFER_SIZE = 64;
+
 export class Manifest {
   private readonly db: Database;
   private readonly lane: Service;
@@ -53,6 +60,7 @@ export class Manifest {
   private readonly allStmt;
   private readonly clearStmt;
   private readonly txn;
+  private pendingUpserts: ManifestEntry[] = [];
 
   static async open(lane: Service): Promise<Manifest> {
     await ensureStateDirs();
@@ -150,8 +158,53 @@ export class Manifest {
     return this.allStmt.all(this.lane);
   }
 
+  /**
+   * Lane snapshot as a Map keyed by `source_id`, for hot-path lookups during
+   * sync. Built once at lane start so workers do O(1) Map gets instead of
+   * N prepared-statement calls.
+   */
+  allMap(): Map<string, ManifestEntry> {
+    const out = new Map<string, ManifestEntry>();
+    for (const e of this.allStmt.all(this.lane)) out.set(e.source_id, e);
+    return out;
+  }
+
   clear(): void {
     this.clearStmt.run(this.lane);
+  }
+
+  /**
+   * Buffer `e` for later flush. Auto-flushes once the buffer hits
+   * UPSERT_BUFFER_SIZE so a long-running lane still persists incrementally.
+   * Callers MUST call `flushPending()` before lane teardown (and in `finally`)
+   * so the trailing partial batch lands.
+   *
+   * Buffer mutation is synchronous and therefore safe under concurrent JS
+   * workers: between awaits, only one worker is on the stack at a time.
+   */
+  upsertBuffered(e: ManifestEntry): void {
+    this.pendingUpserts.push(e);
+    if (this.pendingUpserts.length >= UPSERT_BUFFER_SIZE) this.flushPending();
+  }
+
+  /** Flush any buffered upserts in a single transaction. Idempotent. */
+  flushPending(): void {
+    if (this.pendingUpserts.length === 0) return;
+    const batch = this.pendingUpserts;
+    this.pendingUpserts = [];
+    this.txn(() => {
+      for (const e of batch) {
+        this.upsertStmt.run(
+          this.lane,
+          e.source_id,
+          e.dest_path,
+          e.source_key,
+          e.size_bytes,
+          e.backed_up_at,
+          e.version,
+        );
+      }
+    });
   }
 
   /**
@@ -261,6 +314,12 @@ export class Manifest {
   }
 
   close(): void {
-    this.db.close();
+    // Safety net for callers that forget to flush. Lanes still flush
+    // explicitly before snapshot() so the snapshot includes the final batch.
+    try {
+      this.flushPending();
+    } finally {
+      this.db.close();
+    }
   }
 }

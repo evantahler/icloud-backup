@@ -1,5 +1,5 @@
 import { EventQueue, runPool } from "../concurrency.ts";
-import { DRIVE_ROOTS, DRIVE_SOURCE_ROOT } from "../constants.ts";
+import { DRIVE_ROOTS, DRIVE_SOURCE_ROOT, HOME } from "../constants.ts";
 import { archiveOverwrite, atomicCopy, fileExists, TEMP_SUFFIX_BYTES } from "../copier.ts";
 import {
   DEFAULT_MAX_FILENAME_BYTES,
@@ -13,16 +13,24 @@ import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
 import { type WalkedFile, walk } from "../walker.ts";
 
+export interface BrctlOutcome {
+  folder: string;
+  exitCode: number;
+  stderr: string;
+}
+
 export interface DriveCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  brctlReady?: Promise<BrctlOutcome[]>;
 }
 
 export async function* runDrive({
   dest,
   concurrency,
   snapshot = true,
+  brctlReady,
 }: DriveCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/drive`;
   const mf = await Manifest.open("drive");
@@ -38,13 +46,34 @@ export async function* runDrive({
       message: `destination NAME_MAX=${probedMax}, sanitizing filenames to ${nameCap} bytes`,
     };
 
-    yield { type: "phase", label: "scanning" };
-    const files: WalkedFile[] = [];
-    for (const folder of DRIVE_ROOTS) {
-      for await (const file of walk(`${DRIVE_SOURCE_ROOT}/${folder}`, folder)) {
-        files.push(file);
+    if (brctlReady) {
+      yield { type: "phase", label: "materializing iCloud Drive" };
+      const outcomes = await brctlReady;
+      for (const o of outcomes) {
+        if (o.exitCode !== 0) {
+          yield {
+            type: "log",
+            level: "warn",
+            message: `brctl download ${HOME}/${o.folder} exited ${o.exitCode}: ${o.stderr.trim()}`,
+          };
+        }
       }
     }
+
+    yield { type: "phase", label: "scanning" };
+    // Walk roots in parallel — Desktop and Documents share no state, and
+    // their walks are independent stat-bound work. Two walks halve scan
+    // wall-time on slow filesystems.
+    const perRoot = await Promise.all(
+      DRIVE_ROOTS.map(async (folder) => {
+        const list: WalkedFile[] = [];
+        for await (const file of walk(`${DRIVE_SOURCE_ROOT}/${folder}`, folder)) {
+          list.push(file);
+        }
+        return list;
+      }),
+    );
+    const files = perRoot.flat();
 
     yield {
       type: "total",
@@ -53,6 +82,8 @@ export async function* runDrive({
     };
 
     yield { type: "phase", label: "transferring" };
+
+    const existing = mf.allMap();
 
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
@@ -66,20 +97,16 @@ export async function* runDrive({
       queue.push({ type: "start", name: f.rel, id });
       try {
         const sourceKey = `${f.mtimeMs}|${f.size}`;
-        const existing = mf.get(f.rel);
+        const prior = existing.get(f.rel);
         const safeRel = sanitizeRelativePath(f.rel, nameCap);
         const out = `${root}/${safeRel}`;
 
-        if (
-          existing &&
-          existing.source_key === sourceKey &&
-          (await fileExists(existing.dest_path))
-        ) {
+        if (prior && prior.source_key === sourceKey && (await fileExists(prior.dest_path))) {
           return;
         }
 
-        const version = (existing?.version ?? 0) + 1;
-        if (existing) await archiveOverwrite(existing.dest_path, existing.version, root);
+        const version = (prior?.version ?? 0) + 1;
+        if (prior) await archiveOverwrite(prior.dest_path, prior.version, root);
 
         let bytes = 0;
         try {
@@ -98,7 +125,7 @@ export async function* runDrive({
           return;
         }
 
-        mf.upsert({
+        mf.upsertBuffered({
           source_id: f.rel,
           dest_path: out,
           source_key: sourceKey,
@@ -134,6 +161,7 @@ export async function* runDrive({
     for await (const ev of queue) yield ev;
     await poolDone;
 
+    mf.flushPending();
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {

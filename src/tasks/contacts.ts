@@ -47,6 +47,8 @@ export async function* runContacts({
     const all = db.contacts({ sortBy: "displayName", order: "asc" });
     yield { type: "total", files: all.length };
 
+    const existing = mf.allMap();
+
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
     let nextId = 0;
@@ -75,7 +77,7 @@ export async function* runContacts({
 
         const canonical = stableStringify(details);
         const sourceKey = sha256(canonical);
-        const existing = mf.get(idStr);
+        const prior = existing.get(idStr);
         const fnameSuffix = `-${c.id}.${ext}`;
         const titleCap = Math.max(8, nameCap - fnameSuffix.length);
         const out = join(
@@ -84,22 +86,22 @@ export async function* runContacts({
         );
 
         if (
-          existing &&
-          existing.source_key === sourceKey &&
-          existing.dest_path === out &&
-          (await fileExists(existing.dest_path))
+          prior &&
+          prior.source_key === sourceKey &&
+          prior.dest_path === out &&
+          (await fileExists(prior.dest_path))
         ) {
           return;
         }
 
-        const version = (existing?.version ?? 0) + 1;
-        if (existing) await archiveOverwrite(existing.dest_path, existing.version, root);
+        const version = (prior?.version ?? 0) + 1;
+        if (prior) await archiveOverwrite(prior.dest_path, prior.version, root);
 
         const payload =
           contactsFormat === "json" ? `${JSON.stringify(details, null, 2)}\n` : toVCard(details);
         const bytes = await atomicWrite(out, payload);
 
-        mf.upsert({
+        mf.upsertBuffered({
           source_id: idStr,
           dest_path: out,
           source_key: sourceKey,
@@ -128,6 +130,7 @@ export async function* runContacts({
     for await (const ev of queue) yield ev;
     await poolDone;
 
+    mf.flushPending();
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
