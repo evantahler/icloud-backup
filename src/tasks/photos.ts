@@ -58,6 +58,12 @@ export async function* runPhotos({
     const all = db.photos({ sortBy: "dateCreated", order: "asc" });
     yield { type: "total", files: all.length };
 
+    // Snapshot the manifest once so workers do O(1) Map lookups instead of
+    // N prepared-statement gets. Items processed in this run are upserted
+    // via mf.upsertBuffered and flushed before snapshot — we never re-read
+    // our own writes from this map.
+    const existing = mf.allMap();
+
     const queue = new EventQueue<ProgressEvent>();
     let completed = 0;
     let nextId = 0;
@@ -73,6 +79,19 @@ export async function* runPhotos({
       queue.push({ type: "start", name: displayName, id });
 
       try {
+        // Fast path: if the Photos library hasn't touched this asset since
+        // we last wrote it, the bytes on disk can't have changed. Skip the
+        // per-photo getPhotoUrl + stat round-trips that the slow path does
+        // just to recompute a source_key we already have.
+        const prior = existing.get(idStr);
+        if (
+          prior &&
+          p.modifiedAt.getTime() <= prior.backed_up_at &&
+          (await fileExists(prior.dest_path))
+        ) {
+          return;
+        }
+
         let urlInfo: { url: string; locallyAvailable: boolean };
         try {
           urlInfo = db.getPhotoUrl(p.id);
@@ -108,7 +127,6 @@ export async function* runPhotos({
         }
 
         const sourceKey = `${Math.floor(st.mtimeMs)}|${st.size}`;
-        const existing = mf.get(idStr);
         const out = join(
           root,
           `${p.dateCreated.getFullYear()}`,
@@ -116,22 +134,18 @@ export async function* runPhotos({
           safeName,
         );
 
-        if (
-          existing &&
-          existing.source_key === sourceKey &&
-          (await fileExists(existing.dest_path))
-        ) {
+        if (prior && prior.source_key === sourceKey && (await fileExists(prior.dest_path))) {
           return;
         }
 
-        const version = (existing?.version ?? 0) + 1;
-        if (existing) {
-          await archiveOverwrite(existing.dest_path, existing.version, root);
-          const sidecar = `${existing.dest_path}.json`;
-          await archiveOverwrite(sidecar, existing.version, root);
-          const livePhoto = `${stripExt(existing.dest_path)}.mov`;
+        const version = (prior?.version ?? 0) + 1;
+        if (prior) {
+          await archiveOverwrite(prior.dest_path, prior.version, root);
+          const sidecar = `${prior.dest_path}.json`;
+          await archiveOverwrite(sidecar, prior.version, root);
+          const livePhoto = `${stripExt(prior.dest_path)}.mov`;
           if (await fileExists(livePhoto)) {
-            await archiveOverwrite(livePhoto, existing.version, root);
+            await archiveOverwrite(livePhoto, prior.version, root);
           }
         }
 
@@ -150,7 +164,7 @@ export async function* runPhotos({
           liveBytes = await atomicCopy(liveSrc, liveOut);
         }
 
-        mf.upsert({
+        mf.upsertBuffered({
           source_id: idStr,
           dest_path: out,
           source_key: sourceKey,
@@ -185,6 +199,7 @@ export async function* runPhotos({
     for await (const ev of queue) yield ev;
     await poolDone;
 
+    mf.flushPending();
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {

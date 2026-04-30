@@ -46,6 +46,10 @@ interface PhotoEntry {
   height: number;
   dateCreated: string;
   dateAdded: string;
+  // Optional in fixture JSON; falls back to dateCreated if absent so older
+  // fixtures keep working after macos-ts >= 0.10.7 promoted modifiedAt onto
+  // PhotoMeta.
+  modifiedAt?: string;
   favorite: boolean;
   hidden: boolean;
   latitude: number | null;
@@ -97,6 +101,8 @@ function toPhotoMeta(e: PhotoEntry): PhotoMeta {
     height: e.height,
     dateCreated: new Date(e.dateCreated),
     dateAdded: new Date(e.dateAdded),
+    modifiedAt: new Date(e.modifiedAt ?? e.dateCreated),
+    fileSize: e.fileSize,
     favorite: e.favorite,
     hidden: e.hidden,
     latitude: e.latitude,
@@ -113,7 +119,6 @@ function toPhotoDetails(e: PhotoEntry): PhotoDetails {
     orientation: e.orientation,
     originalFilename: e.originalFilename,
     title: e.title,
-    fileSize: e.fileSize,
     locallyAvailable: e.locallyAvailable,
   };
 }
