@@ -16,6 +16,7 @@ import {
   probeMaxFilenameBytes,
   sanitizeFilename,
 } from "../fsutil.ts";
+import { computeWindow } from "../incremental.ts";
 import { type NoteMeta, Notes } from "../macos.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
@@ -29,6 +30,8 @@ export interface NotesCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  full?: boolean;
+  rewindMs?: number;
 }
 
 // Errno in the prefix so it survives terminal soft-wrap; the long destination
@@ -80,6 +83,8 @@ export async function* runNotes({
   dest,
   concurrency,
   snapshot = true,
+  full = false,
+  rewindMs = 0,
 }: NotesCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/notes`;
   const mf = await Manifest.open("notes");
@@ -100,7 +105,14 @@ export async function* runNotes({
     };
 
     yield { type: "phase", label: "scanning Notes" };
-    const all = db.notes({ sortBy: "modifiedAt", order: "asc" });
+    const runStartedAt = Date.now();
+    const { since, log } = computeWindow(mf, full, rewindMs);
+    yield log;
+    const all = db.notes({
+      sortBy: "modifiedAt",
+      order: "asc",
+      ...(since ? { modifiedAfter: since } : {}),
+    });
     yield { type: "total", files: all.length };
 
     const existing = mf.allMap();
@@ -299,6 +311,9 @@ export async function* runNotes({
     await poolDone;
 
     mf.flushPending();
+    // Clean pass only (see photos.ts): unreachable on throw, so a crash leaves
+    // the prior mark; stored time is when the scan started.
+    mf.setLastSyncStartedAt(runStartedAt);
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {

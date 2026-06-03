@@ -195,7 +195,17 @@ CREATE TABLE entries (
   PRIMARY KEY (lane, source_id)
 );
 CREATE INDEX entries_lane_dest ON entries(lane, dest_path);
-PRAGMA user_version = 1;
+
+-- Per-lane incremental high-water mark (schema v2): the ms-epoch start time of
+-- the last *successful* sync. The next run reads it (minus the overlap window)
+-- to ask the source only for items changed since. Absent ⇒ full scan. Kept out
+-- of destination snapshots on purpose, so a snapshot-hydrated machine full-scans
+-- once, then goes incremental.
+CREATE TABLE sync_state (
+  lane                 TEXT PRIMARY KEY,
+  last_sync_started_at INTEGER NOT NULL
+);
+PRAGMA user_version = 2;
 PRAGMA journal_mode = WAL;
 ```
 
@@ -217,6 +227,15 @@ Why this works:
 - **Destination changes:** if you move from `/Volumes/A` to `/Volumes/B` and re-run, the manifest's `dest_path` won't match the new dest — the file gets re-copied (one-time cost). To avoid that, run `--rebuild` after the move.
 
 We don't sha256 every file (too expensive for a photo library). Stat-based diff is enough except for Contacts where `modifiedAt` isn't reliable.
+
+### Incremental sync (with overlap)
+
+The `source_key` diff above decides *whether a returned item gets copied*; incremental sync decides *which items the source returns in the first place*, so a large library isn't fully enumerated every run.
+
+- **High-water mark:** each lane stores the start time of its last successful sync in `sync_state`. On the next run it computes `since = mark − rewindMs` and asks the source for only what changed since. The mark is written *only on a clean pass* (the code is unreachable if the lane threw), and stores the time the scan *started* (not finished) so edits made mid-run are caught next time. `--full` (or a missing mark) forces a complete scan; `rebuild`'s `clear()` also wipes the mark.
+- **Overlap (`--rewind-time`, default `1d`):** iCloud stamps an item's modification time on the originating device, which then syncs here later. Rewinding the cutoff re-examines a trailing window so a just-synced edit isn't missed. A wider window only re-examines (the `source_key` diff still suppresses duplicate copies); it never re-writes unchanged files. Each lane logs the window via a `log` event at scan start.
+- **Per-lane enumeration:** Photos/Notes pass `modifiedAfter` to macos-ts (≥ 0.12.0), an over-inclusive SQL filter (`ZMODIFICATIONDATE >= T OR ZADDEDDATE >= T` for photos; `modifiedAt >= T OR createdAt >= T` for notes). Drive asks Spotlight via `mdfind -onlyin <root> 'kMDItemFSContentChangeDate >= $time.iso(T)'` instead of walking the tree, falling back to a full `walk()` on any `mdfind` error. **Contacts is always a full scan** — Apple doesn't reliably bump `ZABCDRECORD.ZMODIFICATIONDATE` when a child phone/email/address row changes (type-B staleness, which no overlap can fix), and the dataset is tiny so its sha256 diff is effectively instant.
+- **Why it's safe:** incremental is a pure performance layer over the unchanged per-item diff, and degrades to a full scan whenever the mark is absent. Its blind spots — edits whose timestamp predates the last sync, Drive renames (no content-change bump), a stale/disabled Spotlight index, or an item skipped by a transient per-file error — are all caught by a periodic `--full` run, recommended ~monthly.
 
 ### Destination-side manifest snapshots
 

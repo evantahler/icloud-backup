@@ -209,6 +209,44 @@ describe("Manifest", () => {
     notes.close();
   });
 
+  test("getLastSyncStartedAt is undefined until set, then round-trips and overwrites", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    expect(mf.getLastSyncStartedAt()).toBeUndefined();
+    mf.setLastSyncStartedAt(1700000000000);
+    expect(mf.getLastSyncStartedAt()).toBe(1700000000000);
+    mf.setLastSyncStartedAt(1700000005000);
+    expect(mf.getLastSyncStartedAt()).toBe(1700000005000);
+    mf.close();
+  });
+
+  test("the sync mark is lane-scoped", () => {
+    const path = `${tmp}/m.sqlite`;
+    const photos = new Manifest(path, "photos");
+    const notes = new Manifest(path, "notes");
+    photos.setLastSyncStartedAt(111);
+    expect(photos.getLastSyncStartedAt()).toBe(111);
+    expect(notes.getLastSyncStartedAt()).toBeUndefined();
+    photos.close();
+    notes.close();
+  });
+
+  test("clear() also wipes the sync mark so rebuild forces a full re-scan", () => {
+    const mf = new Manifest(`${tmp}/m.sqlite`);
+    mf.upsert({
+      source_id: "p1",
+      dest_path: "/x/p",
+      source_key: "k",
+      size_bytes: 10,
+      backed_up_at: 1,
+      version: 1,
+    });
+    mf.setLastSyncStartedAt(1700000000000);
+    mf.clear();
+    expect(mf.all()).toEqual([]);
+    expect(mf.getLastSyncStartedAt()).toBeUndefined();
+    mf.close();
+  });
+
   test("get/all are lane-scoped — same source_id in different lanes is independent", () => {
     const path = `${tmp}/m.sqlite`;
     const photos = new Manifest(path, "photos");

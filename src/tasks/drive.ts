@@ -9,9 +9,10 @@ import {
   probeMaxFilenameBytes,
   sanitizeRelativePath,
 } from "../fsutil.ts";
+import { computeWindow } from "../incremental.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
-import { type WalkedFile, walk } from "../walker.ts";
+import { mdfindChangedSince, type WalkedFile, walk } from "../walker.ts";
 
 export interface BrctlOutcome {
   folder: string;
@@ -23,6 +24,8 @@ export interface DriveCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  full?: boolean;
+  rewindMs?: number;
   brctlReady?: Promise<BrctlOutcome[]>;
 }
 
@@ -30,6 +33,8 @@ export async function* runDrive({
   dest,
   concurrency,
   snapshot = true,
+  full = false,
+  rewindMs = 0,
   brctlReady,
 }: DriveCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/drive`;
@@ -61,18 +66,35 @@ export async function* runDrive({
     }
 
     yield { type: "phase", label: "scanning" };
-    // Walk roots in parallel — Desktop and Documents share no state, and
-    // their walks are independent stat-bound work. Two walks halve scan
-    // wall-time on slow filesystems.
+    const runStartedAt = Date.now();
+    const { since, log } = computeWindow(mf, full, rewindMs);
+    yield log;
+    // Scan roots in parallel — Desktop and Documents share no state, and their
+    // scans are independent. Incrementally, ask Spotlight for just the files
+    // changed since the window via mdfind (an indexed lookup instead of a full
+    // tree walk); fall back to a full walk on any mdfind error so we never
+    // silently skip. A full scan (no mark / --full) always walks.
+    const fallbackWarnings: string[] = [];
     const perRoot = await Promise.all(
       DRIVE_ROOTS.map(async (folder) => {
+        const rootPath = `${DRIVE_SOURCE_ROOT}/${folder}`;
         const list: WalkedFile[] = [];
-        for await (const file of walk(`${DRIVE_SOURCE_ROOT}/${folder}`, folder)) {
-          list.push(file);
+        if (since) {
+          try {
+            for await (const file of mdfindChangedSince(rootPath, folder, since)) list.push(file);
+            return list;
+          } catch (err) {
+            fallbackWarnings.push(
+              `mdfind failed for ${folder} (${(err as Error).message}); falling back to a full walk`,
+            );
+            list.length = 0;
+          }
         }
+        for await (const file of walk(rootPath, folder)) list.push(file);
         return list;
       }),
     );
+    for (const message of fallbackWarnings) yield { type: "log", level: "warn", message };
     const files = perRoot.flat();
 
     yield {
@@ -162,6 +184,9 @@ export async function* runDrive({
     await poolDone;
 
     mf.flushPending();
+    // Clean pass only (see photos.ts): unreachable on throw. A mid-run mdfind
+    // fallback still counts as clean — we walked the full tree for that root.
+    mf.setLastSyncStartedAt(runStartedAt);
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {

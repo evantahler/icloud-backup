@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildProgram, DEFAULT_CONCURRENCY, type Intent } from "../src/cli.ts";
+import { buildProgram, DEFAULT_CONCURRENCY, DEFAULT_REWIND, type Intent } from "../src/cli.ts";
+import { parseDuration } from "../src/duration.ts";
 
 function parseIntent(argv: string[]): Intent {
   let captured: Intent | null = null;
@@ -25,6 +26,8 @@ describe("CLI subcommand parsing", () => {
       lanes: [{ service: "photos", dest: "/Volumes/x" }],
       snapshot: true,
       concurrency: DEFAULT_CONCURRENCY,
+      full: false,
+      rewindMs: parseDuration(DEFAULT_REWIND),
     });
   });
 
@@ -122,6 +125,36 @@ describe("CLI subcommand parsing", () => {
     expect(() => parseIntent(["all", "/x", "--concurrency", "65"])).toThrow();
     expect(() => parseIntent(["all", "/x", "--concurrency", "abc"])).toThrow();
     expect(() => parseIntent(["all", "/x", "--concurrency", "1.5"])).toThrow();
+  });
+
+  test("incremental defaults: full=false and rewindMs=1d on every backup command", () => {
+    for (const cmd of ["photos", "drive", "notes", "contacts", "all"]) {
+      expect(parseIntent([cmd, "/x"])).toMatchObject({
+        full: false,
+        rewindMs: parseDuration(DEFAULT_REWIND),
+      });
+    }
+  });
+
+  test("--full sets full=true", () => {
+    expect(parseIntent(["photos", "/x", "--full"])).toMatchObject({ full: true });
+    expect(parseIntent(["all", "/x", "--full"])).toMatchObject({ full: true });
+  });
+
+  test("--rewind-time parses a duration into rewindMs", () => {
+    expect(parseIntent(["photos", "/x", "--rewind-time", "2d"])).toMatchObject({
+      rewindMs: parseDuration("2d"),
+    });
+    expect(parseIntent(["all", "/x", "--rewind-time", "12h"])).toMatchObject({
+      rewindMs: parseDuration("12h"),
+    });
+    expect(parseIntent(["notes", "/x", "--rewind-time", "0"])).toMatchObject({ rewindMs: 0 });
+  });
+
+  test("--rewind-time rejects invalid durations", () => {
+    expect(() => parseIntent(["photos", "/x", "--rewind-time", "abc"])).toThrow();
+    expect(() => parseIntent(["all", "/x", "--rewind-time", "1w"])).toThrow();
+    expect(() => parseIntent(["notes", "/x", "--rewind-time", "-1d"])).toThrow();
   });
 
   test("doctor with no dest → empty lanes", () => {
