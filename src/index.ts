@@ -22,6 +22,8 @@ interface TaskCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  full?: boolean;
+  rewindMs?: number;
   contactsFormat?: ContactsFormat;
   brctlReady?: Promise<BrctlOutcome[]>;
 }
@@ -66,7 +68,13 @@ async function consume(
   return { files, bytes };
 }
 
-async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number): Promise<number> {
+async function runBackup(
+  lanes: Lane[],
+  snapshot: boolean,
+  concurrency: number,
+  full: boolean,
+  rewindMs: number,
+): Promise<number> {
   for (const lane of lanes) {
     try {
       await validateDestination(lane.dest);
@@ -130,6 +138,8 @@ async function runBackup(lanes: Lane[], snapshot: boolean, concurrency: number):
           dest: lane.dest,
           concurrency,
           snapshot,
+          full,
+          rewindMs,
           ...(lane.contactsFormat ? { contactsFormat: lane.contactsFormat } : {}),
           ...(lane.service === "drive" && brctlReady ? { brctlReady } : {}),
         }),
@@ -231,7 +241,13 @@ async function dispatch(intent: Intent): Promise<number> {
     case "rebuild":
       return (await runRebuild(intent.lanes)) ? 0 : 1;
     case "backup":
-      return runBackup(intent.lanes, intent.snapshot, intent.concurrency);
+      return runBackup(
+        intent.lanes,
+        intent.snapshot,
+        intent.concurrency,
+        intent.full,
+        intent.rewindMs,
+      );
   }
 }
 

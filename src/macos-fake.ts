@@ -69,8 +69,19 @@ export class FakePhotos {
   constructor() {
     this.entries = loadJson<{ photos: PhotoEntry[] }>("photos.json").photos;
   }
-  photos(opts?: { order?: "asc" | "desc"; limit?: number }): PhotoMeta[] {
-    let list = this.entries.map((e) => toPhotoMeta(e));
+  photos(opts?: { order?: "asc" | "desc"; limit?: number; modifiedAfter?: Date }): PhotoMeta[] {
+    let entries = this.entries;
+    const after = opts?.modifiedAfter?.getTime();
+    if (after !== undefined) {
+      // Over-inclusive, mirroring the real macos-ts filter (#46): keep an
+      // asset if it was edited OR added on/after the cutoff.
+      entries = entries.filter((e) => {
+        const mod = new Date(e.modifiedAt ?? e.dateCreated).getTime();
+        const added = new Date(e.dateAdded).getTime();
+        return Math.max(mod, added) >= after;
+      });
+    }
+    let list = entries.map((e) => toPhotoMeta(e));
     if (opts?.order === "desc") list = list.slice().reverse();
     if (opts?.limit) list = list.slice(0, opts.limit);
     return list;
@@ -151,8 +162,19 @@ export class FakeNotes {
   constructor() {
     this.entries = loadJson<{ notes: NoteEntry[] }>("notes.json").notes;
   }
-  notes(opts?: { order?: "asc" | "desc"; limit?: number }): NoteMeta[] {
-    let list = this.entries.map(toNoteMeta);
+  notes(opts?: { order?: "asc" | "desc"; limit?: number; modifiedAfter?: Date }): NoteMeta[] {
+    let entries = this.entries;
+    const after = opts?.modifiedAfter?.getTime();
+    if (after !== undefined) {
+      // Over-inclusive, mirroring the real macos-ts filter (#46): keep a note
+      // if it was modified OR created on/after the cutoff.
+      entries = entries.filter((e) => {
+        const mod = new Date(e.modifiedAt).getTime();
+        const created = new Date(e.createdAt).getTime();
+        return Math.max(mod, created) >= after;
+      });
+    }
+    let list = entries.map(toNoteMeta);
     if (opts?.order === "desc") list = list.slice().reverse();
     if (opts?.limit) list = list.slice(0, opts.limit);
     return list;

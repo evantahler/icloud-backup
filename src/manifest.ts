@@ -26,7 +26,7 @@ interface DbRow {
   version: number;
 }
 
-const SCHEMA_USER_VERSION = 1;
+const SCHEMA_USER_VERSION = 2;
 
 function initSchema(db: Database): void {
   db.exec(`
@@ -42,6 +42,17 @@ function initSchema(db: Database): void {
     )
   `);
   db.exec("CREATE INDEX IF NOT EXISTS entries_lane_dest ON entries(lane, dest_path)");
+  // Per-lane incremental high-water mark: the epoch-ms time the last
+  // *successful* sync started. The next run reads it (minus an overlap window)
+  // to ask the source only for items changed since. Absent ⇒ full scan. Kept
+  // out of destination snapshots on purpose so a snapshot-hydrated machine
+  // full-scans once, then goes incremental. See docs/plans/plan.md.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_state (
+      lane                 TEXT PRIMARY KEY,
+      last_sync_started_at INTEGER NOT NULL
+    )
+  `);
   db.exec(`PRAGMA user_version = ${SCHEMA_USER_VERSION}`);
 }
 
@@ -59,6 +70,9 @@ export class Manifest {
   private readonly upsertStmt;
   private readonly allStmt;
   private readonly clearStmt;
+  private readonly syncGetStmt;
+  private readonly syncSetStmt;
+  private readonly syncClearStmt;
   private readonly txn;
   private pendingUpserts: ManifestEntry[] = [];
 
@@ -122,6 +136,14 @@ export class Manifest {
       "SELECT source_id, dest_path, source_key, size_bytes, backed_up_at, version FROM entries WHERE lane = ?",
     );
     this.clearStmt = this.db.query<void, [string]>("DELETE FROM entries WHERE lane = ?");
+    this.syncGetStmt = this.db.query<{ last_sync_started_at: number }, [string]>(
+      "SELECT last_sync_started_at FROM sync_state WHERE lane = ?",
+    );
+    this.syncSetStmt = this.db.query<void, [string, number]>(
+      `INSERT INTO sync_state (lane, last_sync_started_at) VALUES (?, ?)
+       ON CONFLICT(lane) DO UPDATE SET last_sync_started_at = excluded.last_sync_started_at`,
+    );
+    this.syncClearStmt = this.db.query<void, [string]>("DELETE FROM sync_state WHERE lane = ?");
     this.txn = this.db.transaction((fn: () => void) => fn());
   }
 
@@ -171,6 +193,28 @@ export class Manifest {
 
   clear(): void {
     this.clearStmt.run(this.lane);
+    // Forgetting what we've backed up must also forget the incremental
+    // high-water mark, so `rebuild` forces a full re-scan on the next run.
+    this.syncClearStmt.run(this.lane);
+  }
+
+  /**
+   * The epoch-ms start time of this lane's last successful sync, or undefined
+   * if it has never completed one (⇒ caller should full-scan). See
+   * `setLastSyncStartedAt`.
+   */
+  getLastSyncStartedAt(): number | undefined {
+    return this.syncGetStmt.get(this.lane)?.last_sync_started_at;
+  }
+
+  /**
+   * Record the start time of a sync that has now completed cleanly. Stored
+   * (not "now") so items modified *during* the run are re-examined next time;
+   * the caller's overlap window adds further margin. Only call after a lane
+   * finishes without throwing.
+   */
+  setLastSyncStartedAt(ts: number): void {
+    this.syncSetStmt.run(this.lane, ts);
   }
 
   /**

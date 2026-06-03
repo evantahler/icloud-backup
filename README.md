@@ -38,9 +38,15 @@ Per-service backup commands (each takes a destination directory):
   contacts  <dest>     back up Apple Contacts as vCard or JSON → <dest>/contacts/
   all       <dest>     run all four → <dest>/{photos,drive,notes,contacts}/
 
+Backup options (photos / drive / notes / contacts / all):
+  --full                  ignore the incremental high-water mark and re-scan everything
+  --rewind-time <dur>     incremental overlap window, e.g. 1d/12h/30m (default 1d)
+  --concurrency <n>       files in flight per lane (1..64, default 5)
+  --no-manifest-snapshot  skip writing .manifest.sqlite/.json next to backed-up data
+
 Other:
   doctor [dest]        run preflight checks and exit
-  rebuild <dest>       walk destinations and rebuild manifests
+  rebuild <dest>       walk destinations and rebuild manifests (forces a full re-scan next run)
   check-update         force a fresh npm-registry check, print result, exit
   upgrade              upgrade to the latest published version (in-place)
   --help, -h
@@ -60,13 +66,24 @@ icloud-backup photos /Volumes/photo-archive
 ## How it works
 
 - **Photos**: iterates the Photos SQLite library, copies originals + a JSON metadata sidecar, copies the `.mov` companion for Live Photos.
-- **Drive**: `brctl download` materializes Desktop & Documents, then walks them with `Bun.Glob` and copies changed files.
+- **Drive**: `brctl download` materializes Desktop & Documents, then enumerates changed files (incrementally via Spotlight `mdfind`, else a full `Bun.Glob` walk) and copies them.
 - **Notes**: iterates Notes, writes each as a markdown file with attachments in a sibling `.attachments/` directory.
 - **Contacts**: iterates Contacts, writes one JSON file per contact, sha256 of contents is the change key.
 
 State (manifests, lock, update cache) lives at `~/.icloud-backup/` regardless of where backups land — keeps SQLite local-fast and survives unmounted destinations.
 
 When a source changes, the existing destination file is moved to `<dest>/_overwritten/<date>/v<n>/` before the new version is written. Append-only.
+
+## Incremental sync (with overlap)
+
+By default each run is **incremental**: it asks the source only for items changed since the last successful sync, so a large library isn't fully enumerated every time. Photos and Notes filter at the SQLite level (`modifiedAfter`); Drive asks Spotlight (`mdfind`) for files changed since the cutoff instead of walking the whole tree. The per-item manifest diff is unchanged — incremental only shrinks *what's examined*, never how a change is detected — so a wider window only costs re-examination, never duplicate copies.
+
+Because iCloud stamps an item's modification time on the device that made the edit (it then syncs here later), the cutoff is rewound by an **overlap window** (`--rewind-time`, default `1d`) so a just-synced edit isn't missed. Each run logs the window it used.
+
+- `--rewind-time <dur>` — widen/narrow the overlap (e.g. `--rewind-time 7d` if devices sync slowly; `1d`/`12h`/`30m`/bare-seconds accepted).
+- `--full` — ignore the high-water mark and re-scan everything. Run this periodically (e.g. monthly) as a safety net: it catches anything an incremental pass can't see — edits whose timestamp predates the last sync, file renames (Drive), or items skipped by a transient error.
+
+**Contacts is always a full scan** — Apple doesn't reliably bump a contact's modification date when a child field (a phone number, email, address) changes, so a time filter there would silently miss edits. Contacts is tiny, so its content-hash diff is effectively instant anyway.
 
 ## Resume & rebuild
 

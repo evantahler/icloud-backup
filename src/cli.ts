@@ -8,11 +8,20 @@ import {
   DEFAULT_CONTACTS_FORMAT,
   type Lane,
 } from "./destination.ts";
+import { parseDuration } from "./duration.ts";
 
 export const DEFAULT_CONCURRENCY = 5;
+export const DEFAULT_REWIND = "1d";
 
 export type Intent =
-  | { kind: "backup"; lanes: Lane[]; snapshot: boolean; concurrency: number }
+  | {
+      kind: "backup";
+      lanes: Lane[];
+      snapshot: boolean;
+      concurrency: number;
+      full: boolean;
+      rewindMs: number;
+    }
   | { kind: "doctor"; lanes: Lane[] }
   | { kind: "rebuild"; lanes: Lane[] }
   | { kind: "upgrade" }
@@ -66,6 +75,8 @@ interface BackupOpts {
   manifestSnapshot?: boolean;
   concurrency?: number;
   format?: ContactsFormat;
+  full?: boolean;
+  rewindTime?: number;
 }
 
 function snapshotOption(): Option {
@@ -96,6 +107,22 @@ function contactsFormatOption(): Option {
     .default(DEFAULT_CONTACTS_FORMAT);
 }
 
+function fullOption(): Option {
+  return new Option(
+    "--full",
+    "ignore the incremental high-water mark and re-scan every item (Photos/Notes/Drive)",
+  );
+}
+
+function rewindTimeOption(): Option {
+  return new Option(
+    "--rewind-time <duration>",
+    `incremental overlap window re-examined each run, e.g. 1d/12h/30m (default ${DEFAULT_REWIND})`,
+  )
+    .argParser((v) => parseDuration(v))
+    .default(parseDuration(DEFAULT_REWIND), DEFAULT_REWIND);
+}
+
 function addBackupCommand(
   program: Command,
   service: Service,
@@ -106,7 +133,9 @@ function addBackupCommand(
     .description(SERVICE_DESCRIPTIONS[service])
     .argument("<dest>", "destination directory")
     .addOption(snapshotOption())
-    .addOption(concurrencyOption());
+    .addOption(concurrencyOption())
+    .addOption(fullOption())
+    .addOption(rewindTimeOption());
   if (service === "contacts") cmd.addOption(contactsFormatOption());
   cmd.action((dest: string, opts: BackupOpts) => {
     const lane: Lane = { service, dest };
@@ -116,6 +145,8 @@ function addBackupCommand(
       lanes: [lane],
       snapshot: opts.manifestSnapshot !== false,
       concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
+      full: opts.full === true,
+      rewindMs: opts.rewindTime ?? parseDuration(DEFAULT_REWIND),
     });
   });
   applyTheme(cmd);
@@ -128,6 +159,8 @@ function addAllCommand(program: Command, onIntent: (intent: Intent) => void): vo
     .argument("<dest>", "destination directory shared by all four services")
     .addOption(snapshotOption())
     .addOption(concurrencyOption())
+    .addOption(fullOption())
+    .addOption(rewindTimeOption())
     .addOption(contactsFormatOption())
     .action((dest: string, opts: BackupOpts) => {
       const format = opts.format ?? DEFAULT_CONTACTS_FORMAT;
@@ -140,6 +173,8 @@ function addAllCommand(program: Command, onIntent: (intent: Intent) => void): vo
         }),
         snapshot: opts.manifestSnapshot !== false,
         concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
+        full: opts.full === true,
+        rewindMs: opts.rewindTime ?? parseDuration(DEFAULT_REWIND),
       });
     });
   applyTheme(cmd);

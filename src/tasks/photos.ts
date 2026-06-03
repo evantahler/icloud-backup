@@ -16,6 +16,7 @@ import {
   probeMaxFilenameBytes,
   sanitizeFilename,
 } from "../fsutil.ts";
+import { computeWindow } from "../incremental.ts";
 import { type PhotoMeta, Photos } from "../macos.ts";
 import { Manifest } from "../manifest.ts";
 import type { ProgressEvent } from "../tui.ts";
@@ -29,12 +30,16 @@ export interface PhotosCfg {
   dest: string;
   concurrency: number;
   snapshot?: boolean;
+  full?: boolean;
+  rewindMs?: number;
 }
 
 export async function* runPhotos({
   dest,
   concurrency,
   snapshot = true,
+  full = false,
+  rewindMs = 0,
 }: PhotosCfg): AsyncIterable<ProgressEvent> {
   const root = `${dest}/photos`;
   const mf = await Manifest.open("photos");
@@ -55,7 +60,14 @@ export async function* runPhotos({
     };
 
     yield { type: "phase", label: "scanning Photos library" };
-    const all = db.photos({ sortBy: "dateCreated", order: "asc" });
+    const runStartedAt = Date.now();
+    const { since, log } = computeWindow(mf, full, rewindMs);
+    yield log;
+    const all = db.photos({
+      sortBy: "dateCreated",
+      order: "asc",
+      ...(since ? { modifiedAfter: since } : {}),
+    });
     yield { type: "total", files: all.length };
 
     // Snapshot the manifest once so workers do O(1) Map lookups instead of
@@ -200,6 +212,10 @@ export async function* runPhotos({
     await poolDone;
 
     mf.flushPending();
+    // Clean pass only — unreachable if the pool/generator threw, so a crash
+    // leaves the prior mark and the next run re-covers. Stored time is when the
+    // scan started, not now, so edits mid-run are caught next time.
+    mf.setLastSyncStartedAt(runStartedAt);
     if (snapshot) await mf.snapshot(dest);
     yield { type: "done", filesTransferred, bytesTransferred };
   } finally {
