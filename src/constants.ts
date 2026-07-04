@@ -11,7 +11,6 @@ export const STATE_DIR = process.env.ICLOUD_BACKUP_STATE_DIR ?? `${HOME}/.icloud
 export const MANIFEST_PATH = `${STATE_DIR}/manifest.sqlite`;
 export const LOG_DIR = `${STATE_DIR}/logs`;
 export const LOCK_PATH = `${STATE_DIR}/icloud-backup.lock`;
-export const UPDATE_CACHE_PATH = `${STATE_DIR}/update.json`;
 
 // Destination-side filenames written next to backed-up data
 export const MANIFEST_SNAPSHOT_FILE = ".manifest.sqlite";
@@ -25,9 +24,7 @@ export const DRIVE_ROOTS = ["Desktop", "Documents"] as const;
 // directory; in production it's always $HOME.
 export const DRIVE_SOURCE_ROOT = process.env.ICLOUD_BACKUP_FAKE_DRIVE_ROOT ?? HOME;
 
-// Update checker
-export type InstallMethod = "npm" | "bun" | "binary" | "local-dev";
-export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
+// Update checker (backed by the `upgradr` package; see src/updater.ts)
 export const UPDATE_CHECK_TIMEOUT_MS = 3000;
 export const ENV_NO_UPDATE_CHECK = "ICLOUD_BACKUP_NO_UPDATE_CHECK";
 
