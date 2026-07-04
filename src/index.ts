@@ -16,7 +16,7 @@ import { runNotes } from "./tasks/notes.ts";
 import { runPhotos } from "./tasks/photos.ts";
 import type { TuiHandle } from "./tui.ts";
 import { createTui, type ProgressEvent } from "./tui.ts";
-import { maybeCheckForUpdate } from "./update/background.ts";
+import { updater } from "./updater.ts";
 
 interface TaskCfg {
   dest: string;
@@ -95,7 +95,7 @@ async function runBackup(
     throw err;
   }
 
-  const updateNoticePromise = maybeCheckForUpdate();
+  const updateNoticePromise = updater.maybeBackgroundNotice();
 
   // Bootstrap: if a lane's local manifest is missing but a destination snapshot exists,
   // hydrate from it (much cheaper than `rebuild`). Run before lanes start so they pick it up.
